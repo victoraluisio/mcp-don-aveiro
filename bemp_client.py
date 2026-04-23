@@ -74,6 +74,12 @@ class BempClient:
             "Content-Type": "application/json",
             "User-Agent": "bemp-mcp/1.0",
         }
+        # Webhooks publicos nao exigem autenticacao
+        self._webhook_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "bemp-mcp/1.0",
+        }
 
     # ------------------------------------------------------------------
     # helpers
@@ -94,12 +100,14 @@ class BempClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
+        auth: bool = True,
     ) -> Any:
+        headers = self._headers if auth else self._webhook_headers
         with httpx.Client(timeout=self.timeout) as client:
             response = client.request(
                 method,
                 url,
-                headers=self._headers,
+                headers=headers,
                 params=params,
                 json=json_body,
             )
@@ -204,6 +212,7 @@ class BempClient:
             "GET",
             f"{self.webhooks_base}/webhooks/whatsapp_customer",
             params=params,
+            auth=False,
         )
 
     def list_customer_appointments(
