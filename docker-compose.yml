@@ -1,0 +1,30 @@
+# Sobe o servidor MCP na mesma rede do seu n8n.
+#
+# Uso:
+#   1. Copie este arquivo para a VPS (ex: /opt/bemp-mcp/)
+#   2. Copie .env.example para .env e ajuste os valores
+#   3. docker compose up -d --build
+#
+# Se voce ja tem uma rede externa criada pelo docker-compose do n8n
+# (normalmente chamada "n8n_default" ou parecido), descomente a secao
+# "networks" abaixo e troque pelo nome correto. Assim o n8n acessa o
+# MCP pelo hostname do servico (http://bemp-mcp:8000/mcp/) sem expor
+# porta publica.
+
+services:
+  bemp-mcp:
+    build: .
+    container_name: bemp-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Remova o "ports" abaixo se o n8n roda no mesmo docker-compose /
+    # mesma rede e voce NAO quer expor o MCP publicamente.
+    ports:
+      - "127.0.0.1:8000:8000"
+    # networks:
+    #   - n8n_default
+
+# networks:
+#   n8n_default:
+#     external: true
