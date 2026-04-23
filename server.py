@@ -412,6 +412,18 @@ def cancel_appointment(
 
 
 # ---------------------------------------------------------------------------
+# health check (para o EasyPanel/Docker)
+# ---------------------------------------------------------------------------
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok", "service": "bemp-mcp"})
+
+
+# ---------------------------------------------------------------------------
 # entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
