@@ -154,7 +154,7 @@ class BempClient:
         date: str,
         professional_id: int | None = None,
         salon_id: int | None = None,
-    ) -> Any:
+    ) -> Any:  # noqa: D102
         sid = self._resolve_salon(salon_id)
         if professional_id is not None:
             url = (
@@ -167,6 +167,86 @@ class BempClient:
                 f"/slots/{date}"
             )
         return self._request("GET", url)
+
+    def list_multi_service_slots(
+        self,
+        service_ids: list[int],
+        date: str,
+        salon_id: int | None = None,
+    ) -> Any:
+        """Retorna horarios onde todos os servicos cabem consecutivamente."""
+        if not service_ids:
+            return {"available_chains": [], "total": 0}
+        if len(service_ids) == 1:
+            return self.list_slots(service_ids[0], date, salon_id=salon_id)
+
+        def _extract(raw: Any) -> list[dict]:
+            if isinstance(raw, list):
+                return raw
+            if isinstance(raw, dict):
+                for key in ("slots", "data", "results", "available"):
+                    if isinstance(raw.get(key), list):
+                        return raw[key]
+            return []
+
+        all_slots: list[list[dict]] = []
+        for sid in service_ids:
+            raw = self.list_slots(sid, date, salon_id=salon_id)
+            slots = _extract(raw)
+            if not slots:
+                return {
+                    "available_chains": [],
+                    "total": 0,
+                    "message": (
+                        f"Sem disponibilidade para o servico {sid} em {date}."
+                    ),
+                }
+            all_slots.append(slots)
+
+        # Indexa cada servico pelo horario de inicio para busca O(1)
+        indices: list[dict[str, dict]] = []
+        for slots in all_slots:
+            indices.append(
+                {s["start"]: s for s in slots if isinstance(s, dict) and "start" in s}
+            )
+
+        # Percorre slots do 1o servico e verifica se os demais encaixam
+        chains: list[dict] = []
+        for first in all_slots[0]:
+            if not isinstance(first, dict) or "start" not in first or "end" not in first:
+                continue
+            chain = [first]
+            end_cur = first["end"]
+            ok = True
+            for i in range(1, len(service_ids)):
+                nxt = indices[i].get(end_cur)
+                if nxt is None:
+                    ok = False
+                    break
+                chain.append(nxt)
+                end_cur = nxt.get("end", "")
+            if ok:
+                chains.append(
+                    {
+                        "start": chain[0]["start"],
+                        "end": chain[-1]["end"],
+                        "services": [
+                            {
+                                "service_id": service_ids[j],
+                                "start": chain[j]["start"],
+                                "end": chain[j]["end"],
+                            }
+                            for j in range(len(chain))
+                        ],
+                    }
+                )
+
+        return {
+            "date": date,
+            "service_ids": service_ids,
+            "available_chains": chains,
+            "total": len(chains),
+        }
 
     # ------------------------------------------------------------------
     # API v1 - webhooks (agendamento e cliente)

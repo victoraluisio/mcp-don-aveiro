@@ -231,6 +231,57 @@ def list_slots(
 
 
 @mcp.tool
+def list_multi_service_slots(
+    service_ids: Annotated[
+        list[int],
+        Field(
+            description=(
+                "Lista ordenada dos IDs dos servicos desejados. "
+                "A ordem define a sequencia de execucao: o 2o servico "
+                "comeca imediatamente apos o 1o terminar, e assim por diante."
+            ),
+            min_length=2,
+        ),
+    ],
+    date: Annotated[
+        str,
+        Field(
+            description="Data desejada no formato YYYY-MM-DD (ex: 2026-05-03)."
+        ),
+    ],
+    salon_id: Annotated[
+        int | None,
+        Field(description="ID da unidade. Default: BEMP_SALON_ID.", ge=1),
+    ] = None,
+) -> Any:
+    """Lista horarios disponiveis para MULTIPLOS servicos consecutivos.
+
+    Use quando o cliente deseja realizar mais de um servico no mesmo dia.
+    Retorna apenas blocos de horario onde TODOS os servicos podem ser
+    agendados de forma consecutiva (sem intervalo entre eles), na ordem
+    informada em service_ids.
+
+    Cada item de 'available_chains' contem:
+      - start: inicio do primeiro servico
+      - end: fim do ultimo servico
+      - services: lista com service_id, start e end de cada servico
+
+    Para confirmar o agendamento, chame create_appointment para cada
+    servico separadamente usando os start/end correspondentes em 'services'.
+    NUNCA use horarios que nao estejam nesta resposta.
+    """
+    try:
+        d = _normalize_date(date)
+        return get_client().list_multi_service_slots(
+            service_ids=list(service_ids),
+            date=d,
+            salon_id=salon_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _format_error(exc)
+
+
+@mcp.tool
 def create_appointment(
     service_id: Annotated[int, Field(description="ID do servico.", ge=1)],
     start: Annotated[
