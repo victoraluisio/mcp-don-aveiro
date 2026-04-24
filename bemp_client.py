@@ -168,7 +168,7 @@ class BempClient:
             )
         return self._request("GET", url)
 
-    def list_multi_service_slots(
+    def list_multi_service_slots(  # noqa: C901
         self,
         service_ids: list[int],
         date: str,
@@ -207,7 +207,7 @@ class BempClient:
                         pass
             return _td(minutes=30)  # fallback
 
-        # Busca slots de cada servico
+        # Busca slots de cada servico para inferir duracoes
         all_slots: list[list[dict]] = []
         for sid in service_ids:
             raw = self.list_slots(
@@ -226,71 +226,14 @@ class BempClient:
 
         # Calcula duracao de cada servico (inferida dos proprios slots)
         durations = [_duration(slots) for slots in all_slots]
-        extra_duration = sum(durations[1:], _td())  # soma dos servicos apos o 1o
 
-        # Tenta encadeamento exato primeiro (slots com limites alinhados)
-        def _norm(ts: str) -> str:
-            try:
-                return _parse(ts).isoformat()
-            except Exception:
-                return ts.strip()
-
-        indices: list[dict[str, dict]] = []
-        for slots in all_slots:
-            idx: dict[str, dict] = {}
-            for s in slots:
-                if isinstance(s, dict) and "start" in s:
-                    idx[_norm(s["start"])] = s
-            indices.append(idx)
-
-        exact_chains: list[dict] = []
-        for first in all_slots[0]:
-            if not isinstance(first, dict) or "start" not in first or "end" not in first:
-                continue
-            chain = [first]
-            end_cur = _norm(first["end"])
-            ok = True
-            for i in range(1, len(service_ids)):
-                nxt = indices[i].get(end_cur)
-                if nxt is None:
-                    ok = False
-                    break
-                chain.append(nxt)
-                end_cur = _norm(nxt.get("end", ""))
-            if ok:
-                exact_chains.append(
-                    {
-                        "start": chain[0]["start"],
-                        "end": chain[-1]["end"],
-                        "services": [
-                            {
-                                "service_id": service_ids[j],
-                                "start": chain[j]["start"],
-                                "end": chain[j]["end"],
-                            }
-                            for j in range(len(chain))
-                        ],
-                    }
-                )
-
-        if exact_chains:
-            return {
-                "date": date,
-                "service_ids": service_ids,
-                "available_chains": exact_chains,
-                "total": len(exact_chains),
-            }
-
-        # Fallback: slots do 1o servico com end ajustado pela duracao total
-        # Usado quando os limites de slot nao se alinham entre servicos
-        # (ex: corte 1h + sobrancelha 10min + hidratacao 15min)
-        fallback_chains: list[dict] = []
+        # Monta chains: para cada slot do 1o servico, encadeia os demais
+        # usando a duracao de cada servico subsequente.
+        chains: list[dict] = []
         for first in all_slots[0]:
             if not isinstance(first, dict) or "start" not in first or "end" not in first:
                 continue
             try:
-                t_start = _parse(first["start"])
-                t_end = _parse(first["end"])  # fim do 1o servico
                 services: list[dict] = [
                     {
                         "service_id": service_ids[0],
@@ -298,7 +241,7 @@ class BempClient:
                         "end": first["end"],
                     }
                 ]
-                cur = t_end
+                cur = _parse(first["end"])
                 for j in range(1, len(service_ids)):
                     svc_end = cur + durations[j]
                     services.append(
@@ -309,15 +252,11 @@ class BempClient:
                         }
                     )
                     cur = svc_end
-                fallback_chains.append(
+                chains.append(
                     {
                         "start": first["start"],
                         "end": cur.isoformat(),
                         "services": services,
-                        "note": (
-                            "Horarios dos servicos adicionais calculados com base "
-                            "na duracao — confirme disponibilidade ao agendar."
-                        ),
                     }
                 )
             except Exception:
@@ -326,9 +265,8 @@ class BempClient:
         return {
             "date": date,
             "service_ids": service_ids,
-            "available_chains": fallback_chains,
-            "total": len(fallback_chains),
-            "mode": "estimated",
+            "available_chains": chains,
+            "total": len(chains),
         }
 
     # ------------------------------------------------------------------
