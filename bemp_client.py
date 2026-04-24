@@ -217,7 +217,6 @@ class BempClient:
             "GET",
             f"{self.webhooks_base}/webhooks/whatsapp_customer",
             params=params,
-            auth=False,
         )
 
     def list_customer_appointments(
@@ -235,7 +234,6 @@ class BempClient:
             "GET",
             f"{self.webhooks_base}/webhooks/whatsapp_schedule",
             params=params,
-            auth=False,
         )
 
     def cancel_appointment(
@@ -255,5 +253,4 @@ class BempClient:
             "DELETE",
             f"{self.webhooks_base}/webhooks/whatsapp_schedule",
             params=params,
-            auth=False,
         )
