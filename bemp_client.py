@@ -176,7 +176,7 @@ class BempClient:
         salon_id: int | None = None,
     ) -> Any:
         """Retorna horarios onde todos os servicos cabem consecutivamente."""
-        from datetime import datetime as _dt
+        from datetime import datetime as _dt, timedelta as _td
 
         if not service_ids:
             return {"available_chains": [], "total": 0}
@@ -194,15 +194,20 @@ class BempClient:
                         return raw[key]
             return []
 
-        def _norm(ts: str) -> str:
-            """Normaliza timestamp ISO 8601 para comparacao segura."""
-            try:
-                return _dt.fromisoformat(
-                    ts.strip().replace("Z", "+00:00")
-                ).isoformat()
-            except Exception:
-                return ts.strip()
+        def _parse(ts: str) -> _dt:
+            return _dt.fromisoformat(ts.strip().replace("Z", "+00:00"))
 
+        def _duration(slots: list[dict]) -> _td:
+            """Infere duracao do servico a partir do primeiro slot disponivel."""
+            for s in slots:
+                if isinstance(s, dict) and "start" in s and "end" in s:
+                    try:
+                        return _parse(s["end"]) - _parse(s["start"])
+                    except Exception:
+                        pass
+            return _td(minutes=30)  # fallback
+
+        # Busca slots de cada servico
         all_slots: list[list[dict]] = []
         for sid in service_ids:
             raw = self.list_slots(
@@ -219,7 +224,17 @@ class BempClient:
                 }
             all_slots.append(slots)
 
-        # Indexa cada servico pelo horario de inicio normalizado
+        # Calcula duracao de cada servico (inferida dos proprios slots)
+        durations = [_duration(slots) for slots in all_slots]
+        extra_duration = sum(durations[1:], _td())  # soma dos servicos apos o 1o
+
+        # Tenta encadeamento exato primeiro (slots com limites alinhados)
+        def _norm(ts: str) -> str:
+            try:
+                return _parse(ts).isoformat()
+            except Exception:
+                return ts.strip()
+
         indices: list[dict[str, dict]] = []
         for slots in all_slots:
             idx: dict[str, dict] = {}
@@ -228,8 +243,7 @@ class BempClient:
                     idx[_norm(s["start"])] = s
             indices.append(idx)
 
-        # Percorre slots do 1o servico e verifica se os demais encaixam
-        chains: list[dict] = []
+        exact_chains: list[dict] = []
         for first in all_slots[0]:
             if not isinstance(first, dict) or "start" not in first or "end" not in first:
                 continue
@@ -244,7 +258,7 @@ class BempClient:
                 chain.append(nxt)
                 end_cur = _norm(nxt.get("end", ""))
             if ok:
-                chains.append(
+                exact_chains.append(
                     {
                         "start": chain[0]["start"],
                         "end": chain[-1]["end"],
@@ -259,11 +273,62 @@ class BempClient:
                     }
                 )
 
+        if exact_chains:
+            return {
+                "date": date,
+                "service_ids": service_ids,
+                "available_chains": exact_chains,
+                "total": len(exact_chains),
+            }
+
+        # Fallback: slots do 1o servico com end ajustado pela duracao total
+        # Usado quando os limites de slot nao se alinham entre servicos
+        # (ex: corte 1h + sobrancelha 10min + hidratacao 15min)
+        fallback_chains: list[dict] = []
+        for first in all_slots[0]:
+            if not isinstance(first, dict) or "start" not in first or "end" not in first:
+                continue
+            try:
+                t_start = _parse(first["start"])
+                t_end = _parse(first["end"])  # fim do 1o servico
+                services: list[dict] = [
+                    {
+                        "service_id": service_ids[0],
+                        "start": first["start"],
+                        "end": first["end"],
+                    }
+                ]
+                cur = t_end
+                for j in range(1, len(service_ids)):
+                    svc_end = cur + durations[j]
+                    services.append(
+                        {
+                            "service_id": service_ids[j],
+                            "start": cur.isoformat(),
+                            "end": svc_end.isoformat(),
+                        }
+                    )
+                    cur = svc_end
+                fallback_chains.append(
+                    {
+                        "start": first["start"],
+                        "end": cur.isoformat(),
+                        "services": services,
+                        "note": (
+                            "Horarios dos servicos adicionais calculados com base "
+                            "na duracao — confirme disponibilidade ao agendar."
+                        ),
+                    }
+                )
+            except Exception:
+                continue
+
         return {
             "date": date,
             "service_ids": service_ids,
-            "available_chains": chains,
-            "total": len(chains),
+            "available_chains": fallback_chains,
+            "total": len(fallback_chains),
+            "mode": "estimated",
         }
 
     # ------------------------------------------------------------------
