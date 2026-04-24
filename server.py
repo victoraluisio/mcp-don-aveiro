@@ -249,6 +249,17 @@ def list_multi_service_slots(
             description="Data desejada no formato YYYY-MM-DD (ex: 2026-05-03)."
         ),
     ],
+    professional_id: Annotated[
+        int | None,
+        Field(
+            description=(
+                "ID do profissional escolhido. Obrigatorio quando o cliente "
+                "ja escolheu um profissional — garante que os slots retornados "
+                "sejam da agenda desse profissional especificamente."
+            ),
+            ge=1,
+        ),
+    ] = None,
     salon_id: Annotated[
         int | None,
         Field(description="ID da unidade. Default: BEMP_SALON_ID.", ge=1),
@@ -260,6 +271,8 @@ def list_multi_service_slots(
     Retorna apenas blocos de horario onde TODOS os servicos podem ser
     agendados de forma consecutiva (sem intervalo entre eles), na ordem
     informada em service_ids.
+
+    SEMPRE passe professional_id quando o cliente ja escolheu um profissional.
 
     Cada item de 'available_chains' contem:
       - start: inicio do primeiro servico
@@ -275,6 +288,7 @@ def list_multi_service_slots(
         return get_client().list_multi_service_slots(
             service_ids=list(service_ids),
             date=d,
+            professional_id=professional_id,
             salon_id=salon_id,
         )
     except Exception as exc:  # noqa: BLE001

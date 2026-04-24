@@ -172,13 +172,18 @@ class BempClient:
         self,
         service_ids: list[int],
         date: str,
+        professional_id: int | None = None,
         salon_id: int | None = None,
     ) -> Any:
         """Retorna horarios onde todos os servicos cabem consecutivamente."""
+        from datetime import datetime as _dt
+
         if not service_ids:
             return {"available_chains": [], "total": 0}
         if len(service_ids) == 1:
-            return self.list_slots(service_ids[0], date, salon_id=salon_id)
+            return self.list_slots(
+                service_ids[0], date, professional_id=professional_id, salon_id=salon_id
+            )
 
         def _extract(raw: Any) -> list[dict]:
             if isinstance(raw, list):
@@ -189,9 +194,20 @@ class BempClient:
                         return raw[key]
             return []
 
+        def _norm(ts: str) -> str:
+            """Normaliza timestamp ISO 8601 para comparacao segura."""
+            try:
+                return _dt.fromisoformat(
+                    ts.strip().replace("Z", "+00:00")
+                ).isoformat()
+            except Exception:
+                return ts.strip()
+
         all_slots: list[list[dict]] = []
         for sid in service_ids:
-            raw = self.list_slots(sid, date, salon_id=salon_id)
+            raw = self.list_slots(
+                sid, date, professional_id=professional_id, salon_id=salon_id
+            )
             slots = _extract(raw)
             if not slots:
                 return {
@@ -203,12 +219,14 @@ class BempClient:
                 }
             all_slots.append(slots)
 
-        # Indexa cada servico pelo horario de inicio para busca O(1)
+        # Indexa cada servico pelo horario de inicio normalizado
         indices: list[dict[str, dict]] = []
         for slots in all_slots:
-            indices.append(
-                {s["start"]: s for s in slots if isinstance(s, dict) and "start" in s}
-            )
+            idx: dict[str, dict] = {}
+            for s in slots:
+                if isinstance(s, dict) and "start" in s:
+                    idx[_norm(s["start"])] = s
+            indices.append(idx)
 
         # Percorre slots do 1o servico e verifica se os demais encaixam
         chains: list[dict] = []
@@ -216,7 +234,7 @@ class BempClient:
             if not isinstance(first, dict) or "start" not in first or "end" not in first:
                 continue
             chain = [first]
-            end_cur = first["end"]
+            end_cur = _norm(first["end"])
             ok = True
             for i in range(1, len(service_ids)):
                 nxt = indices[i].get(end_cur)
@@ -224,7 +242,7 @@ class BempClient:
                     ok = False
                     break
                 chain.append(nxt)
-                end_cur = nxt.get("end", "")
+                end_cur = _norm(nxt.get("end", ""))
             if ok:
                 chains.append(
                     {
