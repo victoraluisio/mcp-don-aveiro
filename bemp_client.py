@@ -102,7 +102,12 @@ class BempClient:
         json_body: dict[str, Any] | None = None,
         auth: bool = True,
     ) -> Any:
-        headers = self._headers if auth else self._webhook_headers
+        headers = dict(self._headers if auth else self._webhook_headers)
+        # Nao enviar Content-Type em requests sem body (GET/DELETE sem JSON).
+        # A BEMP rejeita com 401 quando recebe Content-Type: application/json
+        # em requests que nao tem body.
+        if json_body is None:
+            headers.pop("Content-Type", None)
         with httpx.Client(timeout=self.timeout) as client:
             response = client.request(
                 method,
@@ -230,6 +235,7 @@ class BempClient:
             "GET",
             f"{self.webhooks_base}/webhooks/whatsapp_schedule",
             params=params,
+            auth=False,
         )
 
     def cancel_appointment(
@@ -249,4 +255,5 @@ class BempClient:
             "DELETE",
             f"{self.webhooks_base}/webhooks/whatsapp_schedule",
             params=params,
+            auth=False,
         )
