@@ -227,6 +227,23 @@ class BempClient:
         except Exception:
             pass  # usa fallback por slots se list_services falhar
 
+        # Valida que todos os service_ids existem nesta unidade.
+        # Evita que IDs incorretos (ex: vindos de memoria de sessao anterior)
+        # passem silenciosamente e causem erro 500 no create_appointment.
+        if _service_dur_map:
+            _invalid = [sid for sid in service_ids if sid not in _service_dur_map]
+            if _invalid:
+                return {
+                    "ok": False,
+                    "error": "service_ids_invalidos",
+                    "message": (
+                        f"Os service_ids {_invalid} nao existem nesta unidade. "
+                        "Chame list_services agora para obter os IDs corretos "
+                        "e repita a chamada com os IDs validos."
+                    ),
+                    "ids_validos": list(_service_dur_map.keys()),
+                }
+
         def _duration(service_id: int, slots: list[dict]) -> _td:
             """Retorna duracao do servico: prioriza campo 'duration' da API de
             servicos; cai para inferencia por slots como ultimo recurso."""
