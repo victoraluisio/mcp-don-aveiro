@@ -197,17 +197,54 @@ class BempClient:
         def _parse(ts: str) -> _dt:
             return _dt.fromisoformat(ts.strip().replace("Z", "+00:00"))
 
-        def _duration(slots: list[dict]) -> _td:
-            """Infere duracao do servico a partir do primeiro slot disponivel."""
+        # Busca duracoes oficiais dos servicos via list_services (campo duration
+        # em segundos). Mais confiavel que inferir pelos slots, pois servicos
+        # curtos podem retornar start == end nos slots da API.
+        _resolved_salon = self._resolve_salon(salon_id)
+        _service_dur_map: dict[int, _td] = {}
+        try:
+            _svc_list = self.list_services(salon_id=_resolved_salon)
+            _items = (
+                _svc_list
+                if isinstance(_svc_list, list)
+                else next(
+                    (
+                        _svc_list[k]
+                        for k in ("services", "data", "results")
+                        if isinstance(_svc_list.get(k), list)
+                    ),
+                    [],
+                )
+            )
+            for _svc in _items:
+                if isinstance(_svc, dict) and "id" in _svc and "duration" in _svc:
+                    try:
+                        dur_s = int(_svc["duration"])
+                        if dur_s > 0:
+                            _service_dur_map[int(_svc["id"])] = _td(seconds=dur_s)
+                    except (ValueError, TypeError):
+                        pass
+        except Exception:
+            pass  # usa fallback por slots se list_services falhar
+
+        def _duration(service_id: int, slots: list[dict]) -> _td:
+            """Retorna duracao do servico: prioriza campo 'duration' da API de
+            servicos; cai para inferencia por slots como ultimo recurso."""
+            api_dur = _service_dur_map.get(service_id)
+            if api_dur:
+                return api_dur
+            # fallback: infere pelo primeiro slot com start/end distintos
+            _min = _td(minutes=15)
             for s in slots:
                 if isinstance(s, dict) and "start" in s and "end" in s:
                     try:
-                        return _parse(s["end"]) - _parse(s["start"])
+                        d = _parse(s["end"]) - _parse(s["start"])
+                        return d if d > _td(0) else _min
                     except Exception:
                         pass
-            return _td(minutes=30)  # fallback
+            return _td(minutes=30)
 
-        # Busca slots de cada servico para inferir duracoes
+        # Busca slots disponiveis de cada servico
         all_slots: list[list[dict]] = []
         for sid in service_ids:
             raw = self.list_slots(
@@ -224,8 +261,8 @@ class BempClient:
                 }
             all_slots.append(slots)
 
-        # Calcula duracao de cada servico (inferida dos proprios slots)
-        durations = [_duration(slots) for slots in all_slots]
+        # Duracoes reais de cada servico (em segundos via API, nao inferidas)
+        durations = [_duration(service_ids[i], all_slots[i]) for i in range(len(service_ids))]
 
         # Indexa horarios disponiveis de cada servico (em UTC) para
         # verificar se o slot calculado existe de fato na agenda.
@@ -263,9 +300,12 @@ class BempClient:
                 cur = _parse(first["end"])
                 valid = True
                 for j in range(1, len(service_ids)):
-                    # Verifica se o horario calculado existe nos slots reais
                     cur_ts = cur.astimezone(_tz.utc).timestamp()
-                    if cur_ts not in available_utc[j]:
+                    # Valida contra o servico ancora (indice 0): seus slots
+                    # refletem corretamente quando o profissional esta livre
+                    # em blocos longos, evitando artefatos da API em servicos
+                    # de curta duracao que podem ter disponibilidade incorreta.
+                    if cur_ts not in available_utc[0]:
                         valid = False
                         break
                     svc_end = cur + durations[j]
