@@ -137,7 +137,22 @@ class BempClient:
 
     def list_services(self, salon_id: int | None = None) -> Any:
         sid = self._resolve_salon(salon_id)
-        return self._request("GET", f"{self.api_base}/api/salons/{sid}/services")
+        raw = self._request("GET", f"{self.api_base}/api/salons/{sid}/services")
+        # Retorna apenas os campos essenciais para o LLM mapear corretamente
+        # nome → id. A resposta completa tem ~30 campos por servico (imagem,
+        # preco, moeda, descricao...) que aumentam o risco de o modelo associar
+        # o ID errado ao nome do servico.
+        if isinstance(raw, list):
+            return [
+                {
+                    "id": svc.get("id"),
+                    "name": svc.get("name"),
+                    "duration": svc.get("duration"),
+                }
+                for svc in raw
+                if isinstance(svc, dict) and svc.get("id") and svc.get("name")
+            ]
+        return raw
 
     def list_professionals(
         self, service_id: int, salon_id: int | None = None
