@@ -227,8 +227,27 @@ class BempClient:
         # Calcula duracao de cada servico (inferida dos proprios slots)
         durations = [_duration(slots) for slots in all_slots]
 
+        # Indexa horarios disponiveis de cada servico (em UTC) para
+        # verificar se o slot calculado existe de fato na agenda.
+        from datetime import timezone as _tz
+
+        def _to_utc_ts(ts: str) -> float:
+            """Converte ISO 8601 para timestamp UTC (segundos)."""
+            return _parse(ts).astimezone(_tz.utc).timestamp()
+
+        available_utc: list[set[float]] = []
+        for slots in all_slots:
+            idx: set[float] = set()
+            for s in slots:
+                if isinstance(s, dict) and "start" in s:
+                    try:
+                        idx.add(_to_utc_ts(s["start"]))
+                    except Exception:
+                        pass
+            available_utc.append(idx)
+
         # Monta chains: para cada slot do 1o servico, encadeia os demais
-        # usando a duracao de cada servico subsequente.
+        # verificando que o horario calculado esta disponivel na agenda real.
         chains: list[dict] = []
         for first in all_slots[0]:
             if not isinstance(first, dict) or "start" not in first or "end" not in first:
@@ -242,7 +261,13 @@ class BempClient:
                     }
                 ]
                 cur = _parse(first["end"])
+                valid = True
                 for j in range(1, len(service_ids)):
+                    # Verifica se o horario calculado existe nos slots reais
+                    cur_ts = cur.astimezone(_tz.utc).timestamp()
+                    if cur_ts not in available_utc[j]:
+                        valid = False
+                        break
                     svc_end = cur + durations[j]
                     services.append(
                         {
@@ -252,13 +277,14 @@ class BempClient:
                         }
                     )
                     cur = svc_end
-                chains.append(
-                    {
-                        "start": first["start"],
-                        "end": cur.isoformat(),
-                        "services": services,
-                    }
-                )
+                if valid:
+                    chains.append(
+                        {
+                            "start": first["start"],
+                            "end": cur.isoformat(),
+                            "services": services,
+                        }
+                    )
             except Exception:
                 continue
 
