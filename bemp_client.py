@@ -143,17 +143,24 @@ class BempClient:
         # preco, moeda, descricao...) que aumentam o risco de o modelo associar
         # o ID errado ao nome do servico.
         if isinstance(raw, list):
-            return [
-                {
+            result = []
+            for svc in raw:
+                if not isinstance(svc, dict) or not svc.get("id") or not svc.get("name"):
+                    continue
+                price_type = str(svc.get("price_type") or "").upper()
+                price_display = (
+                    "A combinar"
+                    if price_type == "VARIABLE"
+                    else (svc.get("price_currency") or svc.get("price") or "")
+                )
+                result.append({
                     "id": svc.get("id"),
                     "name": svc.get("name"),
                     "duration": svc.get("duration"),
-                    "price": svc.get("price_currency") or svc.get("price"),
-                    "price_type": svc.get("price_type"),
-                }
-                for svc in raw
-                if isinstance(svc, dict) and svc.get("id") and svc.get("name")
-            ]
+                    "price_display": price_display,
+                    "price_type": price_type,
+                })
+            return result
         return raw
 
     def list_professionals(
