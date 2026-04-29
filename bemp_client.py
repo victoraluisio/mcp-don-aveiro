@@ -148,6 +148,8 @@ class BempClient:
                     "id": svc.get("id"),
                     "name": svc.get("name"),
                     "duration": svc.get("duration"),
+                    "price": svc.get("price_currency") or svc.get("price"),
+                    "price_type": svc.get("price_type"),
                 }
                 for svc in raw
                 if isinstance(svc, dict) and svc.get("id") and svc.get("name")
