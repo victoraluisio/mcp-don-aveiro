@@ -1,0 +1,420 @@
+{
+  "name": "Don Aveiro - Verificação de Confirmação (INSERIR no fluxo principal)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "da010000-0000-0000-0000-000000000000",
+      "name": "ENTRADA: vem do False branch do isBlocked?",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "INSTRUÇÃO: Conecte a saída False do nó 'isBlocked?' do fluxo principal AQUI.\nA saída deste workflow (nó 'SAÍDA: fluxo normal') conecta no próximo nó do seu fluxo principal."
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $('Dados').item.json.msg.telefone }}_confirm",
+        "keyType": "automatic"
+      },
+      "id": "da010001-0001-0001-0001-000000000001",
+      "name": "Redis - Verificar Chave de Confirmação",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "redis": {
+          "name": "Redis Don Aveiro"
+        }
+      },
+      "notes": "Busca: {msg.telefone}_confirm | Se existir, valor = id do agendamento | Ajuste '$('Dados')' pelo nome do seu nó de dados"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-confirm-key",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "da010002-0002-0002-0002-000000000002",
+      "name": "É Fluxo de Confirmação?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "True = cliente está respondendo confirmação | False = mensagem normal, segue fluxo principal"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Salva o appointment_id (valor do Redis) e dados da mensagem para os próximos nós\nconst appointmentId = $('Redis - Verificar Chave de Confirmação').item.json;\nconst dados = $('Dados').item.json;\nreturn [{\n  json: {\n    appointment_id: appointmentId,\n    telefone: dados.msg.telefone,\n    texto_mensagem: (dados.msg.body || dados.msg.text || '').toLowerCase().trim()\n  }\n}];"
+      },
+      "id": "da010003-0003-0003-0003-000000000003",
+      "name": "Extrair Dados da Confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200],
+      "notes": "Reúne o appointment_id (do Redis) + telefone + texto da mensagem recebida"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "check-positive",
+              "leftValue": "={{ $json.texto_mensagem }}",
+              "rightValue": "confirmo|sim|pode|vou|ok|comparec|present|confirmado|certo|claro",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "da010004-0004-0004-0004-000000000004",
+      "name": "Resposta Positiva?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 200],
+      "notes": "True = CONFIRMO / SIM / OK etc. | False = provável cancelamento ou resposta não reconhecida"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}_confirm"
+      },
+      "id": "da010005-0005-0005-0005-000000000005",
+      "name": "Redis - Remover Chave (Confirmado)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1340, 100],
+      "credentials": {
+        "redis": {
+          "name": "Redis Don Aveiro"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.WAHA_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $vars.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "chatId": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}",
+          "text": "=✅ *Confirmado!* Que ótimo, te esperamos amanhã! 😄\n\n📍 *Endereço:*\n{{ $vars.ENDERECO_BARBEARIA }}\n\n⏰ Chegue alguns minutinhos antes. Qualquer dúvida, é só chamar aqui!",
+          "session": "default"
+        },
+        "options": {}
+      },
+      "id": "da010006-0006-0006-0006-000000000006",
+      "name": "WAHA - Confirmar Presença",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 100],
+      "notes": "Ajuste ENDERECO_BARBEARIA na variável de ambiente do n8n"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "check-negative",
+              "leftValue": "={{ $json.texto_mensagem }}",
+              "rightValue": "cancel|não|nao|nã|impossiv|conseg|falt|desist|imposs",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "da010007-0007-0007-0007-000000000007",
+      "name": "Resposta Negativa?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "notes": "True = CANCELAR / NÃO etc. | False = resposta não reconhecida"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.MCP_URL }}/api/cancel_appointment",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "appointment_id": "={{ $('Extrair Dados da Confirmação').item.json.appointment_id }}",
+          "phone": "={{ $('Extrair Dados da Confirmação').item.json.telefone.replace('@c.us', '') }}"
+        },
+        "options": {}
+      },
+      "id": "da010008-0008-0008-0008-000000000008",
+      "name": "MCP - Cancelar Agendamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 280],
+      "notes": "MCP_URL ex: http://bemp-mcp:8000 | Remove @c.us do telefone antes de enviar"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}_confirm"
+      },
+      "id": "da010009-0009-0009-0009-000000000009",
+      "name": "Redis - Remover Chave (Cancelado)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1780, 280],
+      "credentials": {
+        "redis": {
+          "name": "Redis Don Aveiro"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.WAHA_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $vars.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "chatId": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}",
+          "text": "=😔 Que pena! Seu agendamento foi cancelado.\n\nQuer marcar um novo horário? É só me dizer quando fica melhor pra você que eu verifico a disponibilidade! 📅",
+          "session": "default"
+        },
+        "options": {}
+      },
+      "id": "da010010-0010-0010-0010-000000000010",
+      "name": "WAHA - Oferecer Reagendamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.WAHA_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $vars.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "chatId": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}",
+          "text": "=Oi! Não entendi sua resposta. 😅\n\nPara *confirmar* seu agendamento de amanhã, responda *CONFIRMO*.\nPara *cancelar*, responda *CANCELAR*.",
+          "session": "default"
+        },
+        "options": {}
+      },
+      "id": "da010011-0011-0011-0011-000000000011",
+      "name": "WAHA - Pedir para Repetir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 460],
+      "notes": "Resposta não reconhecida: pede para o cliente repetir claramente"
+    },
+    {
+      "parameters": {},
+      "id": "da010099-0099-0099-0099-000000000099",
+      "name": "SAÍDA: fluxo normal continua",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 460],
+      "notes": "INSTRUÇÃO: Conecte a saída deste nó ao próximo nó do seu fluxo principal de atendimento."
+    }
+  ],
+  "connections": {
+    "ENTRADA: vem do False branch do isBlocked?": {
+      "main": [
+        [
+          {
+            "node": "Redis - Verificar Chave de Confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis - Verificar Chave de Confirmação": {
+      "main": [
+        [
+          {
+            "node": "É Fluxo de Confirmação?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Fluxo de Confirmação?": {
+      "main": [
+        [
+          {
+            "node": "Extrair Dados da Confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SAÍDA: fluxo normal continua",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Dados da Confirmação": {
+      "main": [
+        [
+          {
+            "node": "Resposta Positiva?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta Positiva?": {
+      "main": [
+        [
+          {
+            "node": "Redis - Remover Chave (Confirmado)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta Negativa?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis - Remover Chave (Confirmado)": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Confirmar Presença",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta Negativa?": {
+      "main": [
+        [
+          {
+            "node": "MCP - Cancelar Agendamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "WAHA - Pedir para Repetir",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP - Cancelar Agendamento": {
+      "main": [
+        [
+          {
+            "node": "Redis - Remover Chave (Cancelado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis - Remover Chave (Cancelado)": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Oferecer Reagendamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["don-aveiro", "confirmacao"]
+}

@@ -1,0 +1,210 @@
+{
+  "name": "Don Aveiro - Envio de Confirmações",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * *"
+            }
+          ]
+        }
+      },
+      "id": "da000001-0001-0001-0001-000000000001",
+      "name": "Agendamento Diário 18h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Roda todo dia às 18h (BRT). Ajuste o timezone nas configurações do n8n para America/Sao_Paulo."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retorna a data de amanhã no formato YYYY-MM-DD\nconst d = new Date();\nd.setDate(d.getDate() + 1);\nconst y = d.getFullYear();\nconst m = String(d.getMonth() + 1).padStart(2, '0');\nconst day = String(d.getDate()).padStart(2, '0');\nreturn [{ json: { tomorrow: `${y}-${m}-${day}` } }];"
+      },
+      "id": "da000002-0002-0002-0002-000000000002",
+      "name": "Calcular Amanhã",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.SUPABASE_URL }}/rest/v1/DonAveiro_Agendamentos",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,v_cliente,Telefone,start,id_servico,id_barbeiro"
+            },
+            {
+              "name": "Data do agendamento",
+              "value": "=eq.{{ $('Calcular Amanhã').item.json.tomorrow }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "da000003-0003-0003-0003-000000000003",
+      "name": "Buscar Agendamentos de Amanhã",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "notes": "SUPABASE_URL ex: https://xyzxyz.supabase.co | SUPABASE_ANON_KEY: chave anon do projeto"
+    },
+    {
+      "parameters": {
+        "jsCode": "// A resposta do Supabase é um array no $json\n// Converte cada item do array em um item separado do n8n\nconst items = $input.first().json;\nif (!Array.isArray(items) || items.length === 0) {\n  return [];\n}\nreturn items.map(item => ({ json: item }));"
+      },
+      "id": "da000004-0004-0004-0004-000000000004",
+      "name": "Separar Agendamentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "notes": "Separa o array retornado pelo Supabase em itens individuais para processar um a um"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $json.Telefone }}@c.us_confirm",
+        "value": "={{ $json.id }}",
+        "keyType": "automatic",
+        "expire": true,
+        "ttl": 108000
+      },
+      "id": "da000005-0005-0005-0005-000000000005",
+      "name": "Redis - Criar Chave de Confirmação",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "redis": {
+          "name": "Redis Don Aveiro"
+        }
+      },
+      "notes": "Chave: {Telefone}@c.us_confirm | Valor: id do agendamento | TTL: 30h (108000s)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.WAHA_URL }}/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Api-Key",
+              "value": "={{ $vars.WAHA_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "chatId": "={{ $('Separar Agendamentos').item.json.Telefone }}@c.us",
+          "text": "=Olá, *{{ $('Separar Agendamentos').item.json.v_cliente }}*! 👋\n\nPassando para confirmar seu agendamento de amanhã na *Don Aveiro*. ✂️\n\nResponda aqui mesmo:\n✅ *CONFIRMO* — para confirmar sua presença\n❌ *CANCELAR* — se não puder comparecer\n\nCaso cancele, podemos remarcar direto aqui no chat. 😊",
+          "session": "default"
+        },
+        "options": {}
+      },
+      "id": "da000006-0006-0006-0006-000000000006",
+      "name": "WAHA - Enviar Confirmação",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300],
+      "notes": "WAHA_URL ex: http://waha:3000 | WAHA_API_KEY: chave da API WAHA | session: nome da sessão"
+    }
+  ],
+  "connections": {
+    "Agendamento Diário 18h": {
+      "main": [
+        [
+          {
+            "node": "Calcular Amanhã",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Amanhã": {
+      "main": [
+        [
+          {
+            "node": "Buscar Agendamentos de Amanhã",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Agendamentos de Amanhã": {
+      "main": [
+        [
+          {
+            "node": "Separar Agendamentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar Agendamentos": {
+      "main": [
+        [
+          {
+            "node": "Redis - Criar Chave de Confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis - Criar Chave de Confirmação": {
+      "main": [
+        [
+          {
+            "node": "WAHA - Enviar Confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "tags": ["don-aveiro", "confirmacao"]
+}

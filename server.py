@@ -523,6 +523,64 @@ async def health_check(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# REST endpoint para cancelamento via n8n (automacao de confirmacoes)
+# ---------------------------------------------------------------------------
+def _parse_phone(full_phone: str) -> tuple[str, str, str]:
+    """Converte numero completo em (country_code, area_code, number).
+
+    Espera formato sem formatacao: 5561996800868
+    Para numeros brasileiros (prefix 55): cc=55, ac=2 digitos, num=resto.
+    """
+    s = re.sub(r"\D", "", full_phone)
+    if s.startswith("55") and len(s) >= 12:
+        return "55", s[2:4], s[4:]
+    # Fallback: assume 2 digitos de pais, 2 de area, resto eh numero
+    if len(s) >= 6:
+        return s[:2], s[2:4], s[4:]
+    raise ValueError(f"Telefone invalido para parse: {full_phone!r}")
+
+
+@mcp.custom_route("/api/cancel_appointment", methods=["POST"])
+async def cancel_appointment_rest(request: Request) -> JSONResponse:
+    """Cancela agendamento via chamada REST — usado pelo workflow n8n de confirmacoes.
+
+    Body JSON esperado:
+        {
+            "appointment_id": 12345,
+            "phone": "5561996800868"
+        }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Body JSON invalido."}, status_code=400)
+
+    appointment_id = body.get("appointment_id")
+    phone = str(body.get("phone", "")).strip()
+
+    if not appointment_id:
+        return JSONResponse({"ok": False, "error": "appointment_id e obrigatorio."}, status_code=400)
+    if not phone:
+        return JSONResponse({"ok": False, "error": "phone e obrigatorio."}, status_code=400)
+
+    try:
+        cc, ac, num = _parse_phone(phone)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    try:
+        result = get_client().cancel_appointment(
+            appointment_id=int(appointment_id),
+            phone_country_code=cc,
+            phone_area_code=ac,
+            phone_number=num,
+        )
+        return JSONResponse(result)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(_format_error(exc), status_code=500)
+
+
+# ---------------------------------------------------------------------------
 # entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
