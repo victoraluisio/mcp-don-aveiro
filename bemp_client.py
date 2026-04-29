@@ -383,6 +383,53 @@ class BempClient:
             "total": len(chains),
         }
 
+    def find_services_by_name(
+        self, queries: list[str], salon_id: int | None = None
+    ) -> Any:
+        """Resolve nomes de servicos para seus IDs.
+
+        Para cada string em `queries`, busca correspondencia parcial
+        case-insensitive nos servicos da unidade. Retorna os IDs
+        corretos sem exigir que o agente leia e interprete uma lista
+        longa de servicos.
+        """
+        services = self.list_services(salon_id=salon_id)
+        if not isinstance(services, list):
+            return services
+
+        # Indice rapido nome -> service (case-insensitive)
+        results: list[dict] = []
+        unmatched: list[str] = []
+
+        for q in queries:
+            q_lower = q.lower().strip()
+            matches = [
+                {
+                    "id": svc["id"],
+                    "name": svc["name"],
+                    "duration": svc.get("duration"),
+                    "price_display": svc.get("price_display"),
+                    "price_type": svc.get("price_type"),
+                }
+                for svc in services
+                if isinstance(svc, dict) and q_lower in (svc.get("name") or "").lower()
+            ]
+            if matches:
+                results.append({"query": q, "matches": matches})
+            else:
+                unmatched.append(q)
+
+        response: dict[str, Any] = {"resolved": results}
+        if unmatched:
+            # Retorna lista completa para o agente escolher manualmente
+            response["unmatched_queries"] = unmatched
+            response["all_services"] = services
+            response["hint"] = (
+                "As queries acima nao tiveram correspondencia. "
+                "Consulte 'all_services' para encontrar o servico correto."
+            )
+        return response
+
     # ------------------------------------------------------------------
     # API v1 - webhooks (agendamento e cliente)
     # ------------------------------------------------------------------

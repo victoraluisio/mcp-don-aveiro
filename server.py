@@ -161,6 +161,40 @@ def list_services(
 
 
 @mcp.tool
+def find_services(
+    queries: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Lista de nomes (ou partes do nome) dos servicos desejados. "
+                "Ex: ['sobrancelha pinca', 'progressiva']. "
+                "A busca e parcial e case-insensitive."
+            ),
+            min_length=1,
+        ),
+    ],
+    salon_id: Annotated[
+        int | None,
+        Field(description="ID da unidade. Default: BEMP_SALON_ID.", ge=1),
+    ] = None,
+) -> Any:
+    """Resolve nomes de servicos para IDs sem exigir leitura de lista longa.
+
+    Use SEMPRE que precisar do service_id de um servico especifico.
+    Passe os nomes (ou fragmentos de nome) que o cliente mencionou e
+    receba os IDs corretos prontos para usar em list_slots,
+    list_multi_service_slots e create_appointment.
+
+    NUNCA invente service_ids. Use exclusivamente os IDs retornados
+    por esta tool ou por list_services.
+    """
+    try:
+        return get_client().find_services_by_name(queries=queries, salon_id=salon_id)
+    except Exception as exc:  # noqa: BLE001
+        return _format_error(exc)
+
+
+@mcp.tool
 def list_professionals(
     service_id: Annotated[
         int,
