@@ -58,7 +58,7 @@
               "value": "id,v_cliente,Telefone,start,id_servico,id_barbeiro"
             },
             {
-              "name": "Data do agendamento",
+              "name": "start",
               "value": "=like.{{ $('Calcular Amanhã').item.json.tomorrow }}%"
             }
           ]
