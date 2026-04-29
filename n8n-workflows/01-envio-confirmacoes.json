@@ -59,7 +59,7 @@
             },
             {
               "name": "Data do agendamento",
-              "value": "=eq.{{ $('Calcular Amanhã').item.json.tomorrow }}"
+              "value": "=like.{{ $('Calcular Amanhã').item.json.tomorrow }}%"
             }
           ]
         },
