@@ -12,44 +12,26 @@
           ]
         }
       },
-      "id": "da000001-0001-0001-0001-000000000001",
+      "id": "d6eed34e-99db-4772-9aea-00ebea2a9794",
       "name": "Agendamento Diário 18h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [240, 300],
-      "notes": "Roda todo dia às 18h (BRT). Ajuste o timezone nas configurações do n8n para America/Sao_Paulo."
+      "position": [-144, -160],
+      "notes": "Roda todo dia às 18h (BRT). Configure timezone America/Sao_Paulo nas settings do n8n."
     },
     {
       "parameters": {
-        "jsCode": "// Retorna a data de amanhã no formato YYYY-MM-DD\nconst d = new Date();\nd.setDate(d.getDate() + 1);\nconst y = d.getFullYear();\nconst m = String(d.getMonth() + 1).padStart(2, '0');\nconst day = String(d.getDate()).padStart(2, '0');\nreturn [{ json: { tomorrow: `${y}-${m}-${day}` } }];"
+        "jsCode": "const d = new Date();\nd.setDate(d.getDate() + 1);\nconst y = d.getFullYear();\nconst m = String(d.getMonth() + 1).padStart(2, '0');\nconst day = String(d.getDate()).padStart(2, '0');\nreturn [{ json: { tomorrow: `${y}-${m}-${day}` } }];"
       },
-      "id": "da000002-0002-0002-0002-000000000002",
+      "id": "d879b9e6-8141-4546-bc45-01b940be1bfb",
       "name": "Calcular Amanhã",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [80, -160]
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $vars.SUPABASE_URL }}/rest/v1/DonAveiro_Agendamentos",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $vars.SUPABASE_ANON_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $vars.SUPABASE_ANON_KEY }}"
-            },
-            {
-              "name": "Accept",
-              "value": "application/json"
-            }
-          ]
-        },
+        "url": "=https://zjmtlkgpkxmbjvhgbzpr.supabase.co/rest/v1/DonAveiro_Agendamentos",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -63,6 +45,23 @@
             }
           ]
         },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "=SUA_SUPABASE_SECRET_KEY_AQUI"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer SUA_SUPABASE_SECRET_KEY_AQUI"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
         "options": {
           "response": {
             "response": {
@@ -71,134 +70,112 @@
           }
         }
       },
-      "id": "da000003-0003-0003-0003-000000000003",
+      "id": "cbc0243f-9dd1-409e-ac16-7851ef72ba20",
       "name": "Buscar Agendamentos de Amanhã",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300],
-      "notes": "SUPABASE_URL ex: https://xyzxyz.supabase.co | SUPABASE_ANON_KEY: chave anon do projeto"
+      "position": [304, -160]
     },
     {
       "parameters": {
-        "jsCode": "// A resposta do Supabase é um array no $json\n// Converte cada item do array em um item separado do n8n\nconst items = $input.first().json;\nif (!Array.isArray(items) || items.length === 0) {\n  return [];\n}\nreturn items.map(item => ({ json: item }));"
+        "jsCode": "// Agrupa múltiplos agendamentos do mesmo cliente em um único item\n// Garante que clientes com 2+ serviços recebam apenas 1 mensagem\nconst items = $input.all();\nconst grouped = {};\n\nfor (const item of items) {\n  const phone = item.json.Telefone;\n  if (!grouped[phone]) {\n    grouped[phone] = {\n      Telefone: phone,\n      v_cliente: item.json.v_cliente,\n      appointments: []\n    };\n  }\n  grouped[phone].appointments.push({\n    id: item.json.id,\n    start: item.json.start,\n    id_servico: String(item.json.id_servico),\n    id_barbeiro: String(item.json.id_barbeiro)\n  });\n}\n\n// Ordena os agendamentos de cada cliente por horário\nconst result = Object.values(grouped).map(client => {\n  client.appointments.sort((a, b) => a.start.localeCompare(b.start));\n  client.appointment_ids = client.appointments.map(a => a.id).join(',');\n  return { json: client };\n});\n\nreturn result;"
       },
-      "id": "da000004-0004-0004-0004-000000000004",
-      "name": "Separar Agendamentos",
+      "id": "aa000001-aaaa-aaaa-aaaa-000000000001",
+      "name": "Agrupar por Cliente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 300],
-      "notes": "Separa o array retornado pelo Supabase em itens individuais para processar um a um"
+      "position": [528, -160],
+      "notes": "Um cliente com 2 serviços gera 2 linhas no Supabase mas deve receber 1 mensagem única"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://bemp-mcp:8000/api/services",
+        "options": {}
+      },
+      "id": "aa000002-aaaa-aaaa-aaaa-000000000002",
+      "name": "MCP - Buscar Nomes dos Serviços",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [752, -160],
+      "notes": "Ajuste a URL para o endereço do seu servidor MCP (ex: http://bemp-mcp:8000)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta a mensagem de confirmação com todos os serviços do cliente\nconst services = $json; // array de serviços do MCP\nconst client = $('Agrupar por Cliente').item.json;\n\n// Cria mapa id_servico -> nome\nconst serviceMap = {};\nif (Array.isArray(services)) {\n  for (const svc of services) {\n    serviceMap[String(svc.id)] = svc.name;\n  }\n}\n\n// Formata cada agendamento do cliente\nconst emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];\nconst apptLines = client.appointments.map((appt, i) => {\n  const serviceName = serviceMap[appt.id_servico] || `Serviço ${appt.id_servico}`;\n  const d = new Date(appt.start);\n  const timeStr = d.toLocaleTimeString('pt-BR', {\n    hour: '2-digit',\n    minute: '2-digit',\n    timeZone: 'America/Sao_Paulo'\n  });\n  return `${emojis[i] || '•'} *${serviceName}* — ${timeStr}`;\n});\n\n// Plural ou singular\nconst plural = client.appointments.length > 1;\nconst header = plural\n  ? `Passando para confirmar seus *${client.appointments.length} agendamentos* de amanhã na *Don Aveiro* ✂️`\n  : `Passando para confirmar seu agendamento de amanhã na *Don Aveiro* ✂️`;\n\nconst msg = `Olá, *${client.v_cliente}*! 👋\\n\\n${header}\\n\\n${apptLines.join('\\n')}\\n\\nConfirme sua presença respondendo:\\n✅ *CONFIRMO* — presença confirmada\\n❌ *CANCELAR* — se não puder comparecer\\n\\nCaso cancele, podemos remarcar direto aqui no chat! 😊`;\n\nreturn [{\n  json: {\n    Telefone: client.Telefone,\n    v_cliente: client.v_cliente,\n    chatId: `${client.Telefone}@c.us`,\n    text: msg,\n    appointment_ids: client.appointment_ids\n  }\n}];"
+      },
+      "id": "aa000003-aaaa-aaaa-aaaa-000000000003",
+      "name": "Formatar Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [976, -160],
+      "notes": "Formata mensagem listando todos os serviços do cliente com horários"
     },
     {
       "parameters": {
         "operation": "set",
         "key": "={{ $json.Telefone }}@c.us_confirm",
-        "value": "={{ $json.id }}",
-        "keyType": "automatic",
+        "value": "={{ $json.appointment_ids }}",
+        "keyType": "string",
         "expire": true,
         "ttl": 108000
       },
-      "id": "da000005-0005-0005-0005-000000000005",
+      "id": "5c9de85c-dc6c-46c9-b518-2e2fa58b9b17",
       "name": "Redis - Criar Chave de Confirmação",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [1120, 300],
+      "position": [1200, -160],
       "credentials": {
         "redis": {
-          "name": "Redis Don Aveiro"
+          "id": "U9HEZyPuKhnXUoe8",
+          "name": "Redis account"
         }
       },
-      "notes": "Chave: {Telefone}@c.us_confirm | Valor: id do agendamento | TTL: 30h (108000s)"
+      "notes": "Valor: IDs separados por vírgula (ex: '352,353'). TTL: 30h"
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ $vars.WAHA_URL }}/api/sendText",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Api-Key",
-              "value": "={{ $vars.WAHA_API_KEY }}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "json",
-        "body": {
-          "chatId": "={{ $('Separar Agendamentos').item.json.Telefone }}@c.us",
-          "text": "=Olá, *{{ $('Separar Agendamentos').item.json.v_cliente }}*! 👋\n\nPassando para confirmar seu agendamento de amanhã na *Don Aveiro*. ✂️\n\nResponda aqui mesmo:\n✅ *CONFIRMO* — para confirmar sua presença\n❌ *CANCELAR* — se não puder comparecer\n\nCaso cancele, podemos remarcar direto aqui no chat. 😊",
-          "session": "default"
-        },
-        "options": {}
+        "resource": "Chatting",
+        "operation": "Send Text",
+        "session": "=default",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "requestOptions": {}
       },
-      "id": "da000006-0006-0006-0006-000000000006",
-      "name": "WAHA - Enviar Confirmação",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1340, 300],
-      "notes": "WAHA_URL ex: http://waha:3000 | WAHA_API_KEY: chave da API WAHA | session: nome da sessão"
+      "type": "n8n-nodes-waha.WAHA",
+      "typeVersion": 202411,
+      "position": [1424, -160],
+      "id": "5dc33deb-28b2-40db-97e6-5bc23f17533b",
+      "name": "Msg Confirmação",
+      "credentials": {
+        "wahaApi": {
+          "id": "xhfBIX19XNtxO9AM",
+          "name": "WAHA account"
+        }
+      }
     }
   ],
   "connections": {
     "Agendamento Diário 18h": {
-      "main": [
-        [
-          {
-            "node": "Calcular Amanhã",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Calcular Amanhã", "type": "main", "index": 0}]]
     },
     "Calcular Amanhã": {
-      "main": [
-        [
-          {
-            "node": "Buscar Agendamentos de Amanhã",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Buscar Agendamentos de Amanhã", "type": "main", "index": 0}]]
     },
     "Buscar Agendamentos de Amanhã": {
-      "main": [
-        [
-          {
-            "node": "Separar Agendamentos",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Agrupar por Cliente", "type": "main", "index": 0}]]
     },
-    "Separar Agendamentos": {
-      "main": [
-        [
-          {
-            "node": "Redis - Criar Chave de Confirmação",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Agrupar por Cliente": {
+      "main": [[{"node": "MCP - Buscar Nomes dos Serviços", "type": "main", "index": 0}]]
+    },
+    "MCP - Buscar Nomes dos Serviços": {
+      "main": [[{"node": "Formatar Mensagem", "type": "main", "index": 0}]]
+    },
+    "Formatar Mensagem": {
+      "main": [[{"node": "Redis - Criar Chave de Confirmação", "type": "main", "index": 0}]]
     },
     "Redis - Criar Chave de Confirmação": {
-      "main": [
-        [
-          {
-            "node": "WAHA - Enviar Confirmação",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{"node": "Msg Confirmação", "type": "main", "index": 0}]]
     }
   },
   "active": false,
@@ -206,5 +183,11 @@
     "executionOrder": "v1",
     "timezone": "America/Sao_Paulo"
   },
-  "tags": ["don-aveiro", "confirmacao"]
+  "versionId": "2a4cd013-aa8c-489d-af52-417902d21d19",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "47d8ce9d6cdbff4c87e0eb7d2fc6cd61814f98fe88237bb07d85df75707e356c"
+  },
+  "id": "6FtwBOZVXmsteonH",
+  "tags": []
 }

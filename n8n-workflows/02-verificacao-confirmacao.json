@@ -59,7 +59,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Salva o appointment_id (valor do Redis) e dados da mensagem para os próximos nós\nconst appointmentId = $('Redis - Verificar Chave de Confirmação').item.json;\nconst dados = $('Dados').item.json;\nreturn [{\n  json: {\n    appointment_id: appointmentId,\n    telefone: dados.msg.telefone,\n    texto_mensagem: (dados.msg.body || dados.msg.text || '').toLowerCase().trim()\n  }\n}];"
+        "jsCode": "// Salva os IDs dos agendamentos (valor do Redis, pode ser '352' ou '352,353') e dados da mensagem\nconst appointmentIds = $('Redis - Verificar Chave de Confirmação').item.json;\nconst dados = $('Dados').item.json;\nreturn [{\n  json: {\n    appointment_ids: appointmentIds,\n    telefone: dados.msg.telefone,\n    texto_mensagem: (dados.msg.body || dados.msg.text || '').toLowerCase().trim()\n  }\n}];"
       },
       "id": "da010003-0003-0003-0003-000000000003",
       "name": "Extrair Dados da Confirmação",
@@ -173,31 +173,14 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ $vars.MCP_URL }}/api/cancel_appointment",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "json",
-        "body": {
-          "appointment_id": "={{ $('Extrair Dados da Confirmação').item.json.appointment_id }}",
-          "phone": "={{ $('Extrair Dados da Confirmação').item.json.telefone.replace('@c.us', '') }}"
-        },
-        "options": {}
+        "jsCode": "// Cancela todos os agendamentos do cliente (pode ter 1 ou mais serviços)\n// O valor do Redis é IDs separados por vírgula: '352' ou '352,353'\nconst dados = $('Extrair Dados da Confirmação').item.json;\nconst phone = dados.telefone.replace('@c.us', '');\nconst ids = String(dados.appointment_ids).split(',').map(id => id.trim()).filter(Boolean);\n\nconst results = [];\nfor (const appointment_id of ids) {\n  const resp = await $http.request({\n    method: 'POST',\n    url: 'http://bemp-mcp:8000/api/cancel_appointment',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ appointment_id: Number(appointment_id), phone })\n  });\n  results.push({ id: appointment_id, result: resp.body });\n}\n\nreturn [{ json: { cancelled: results, phone, total: ids.length } }];"
       },
       "id": "da010008-0008-0008-0008-000000000008",
-      "name": "MCP - Cancelar Agendamento",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "MCP - Cancelar Agendamentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [1560, 280],
-      "notes": "MCP_URL ex: http://bemp-mcp:8000 | Remove @c.us do telefone antes de enviar"
+      "notes": "Cancela 1 ou múltiplos agendamentos via MCP. Ajuste a URL do MCP se necessário."
     },
     {
       "parameters": {

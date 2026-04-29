@@ -540,6 +540,52 @@ def _parse_phone(full_phone: str) -> tuple[str, str, str]:
     raise ValueError(f"Telefone invalido para parse: {full_phone!r}")
 
 
+@mcp.custom_route("/api/services", methods=["GET"])
+async def services_rest(request: Request) -> JSONResponse:
+    """Retorna lista de servicos da unidade via REST — usado pelo n8n.
+
+    Query param opcional: salon_id
+    """
+    salon_id = request.query_params.get("salon_id")
+    try:
+        result = get_client().list_services(salon_id=int(salon_id) if salon_id else None)
+        return JSONResponse(result)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(_format_error(exc), status_code=500)
+
+
+@mcp.custom_route("/api/customer_appointments", methods=["POST"])
+async def customer_appointments_rest(request: Request) -> JSONResponse:
+    """Retorna agendamentos abertos do cliente via REST — usado pelo n8n.
+
+    Body JSON esperado:
+        { "phone": "5511959707203" }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Body JSON invalido."}, status_code=400)
+
+    phone = str(body.get("phone", "")).strip()
+    if not phone:
+        return JSONResponse({"ok": False, "error": "phone e obrigatorio."}, status_code=400)
+
+    try:
+        cc, ac, num = _parse_phone(phone)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    try:
+        result = get_client().list_customer_appointments(
+            phone_country_code=cc,
+            phone_area_code=ac,
+            phone_number=num,
+        )
+        return JSONResponse(result)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(_format_error(exc), status_code=500)
+
+
 @mcp.custom_route("/api/cancel_appointment", methods=["POST"])
 async def cancel_appointment_rest(request: Request) -> JSONResponse:
     """Cancela agendamento via chamada REST — usado pelo workflow n8n de confirmacoes.
