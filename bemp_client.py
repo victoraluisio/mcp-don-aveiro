@@ -267,6 +267,13 @@ class BempClient:
                     ),
                     "ids_validos": list(_service_dur_map.keys()),
                 }
+            # Reordena do mais demorado para o menos demorado. Servicos curtos
+            # no final nao quebram o alinhamento de 15 minutos da grade de slots.
+            service_ids = sorted(
+                service_ids,
+                key=lambda s: _service_dur_map.get(s, _td(0)),
+                reverse=True,
+            )
 
         def _duration(service_id: int, slots: list[dict]) -> _td:
             """Retorna duracao do servico: prioriza campo 'duration' da API de
