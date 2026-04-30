@@ -545,11 +545,12 @@ async def services_rest(request: Request) -> JSONResponse:
     """Retorna lista de servicos da unidade via REST — usado pelo n8n.
 
     Query param opcional: salon_id
+    Retorna {"services": [...]} (objeto, nao array) para o n8n nao dividir em N itens.
     """
     salon_id = request.query_params.get("salon_id")
     try:
         result = get_client().list_services(salon_id=int(salon_id) if salon_id else None)
-        return JSONResponse(result)
+        return JSONResponse({"services": result})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(_format_error(exc), status_code=500)
 

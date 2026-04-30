@@ -21,13 +21,26 @@
     },
     {
       "parameters": {
+        "method": "GET",
+        "url": "http://bemp-mcp:8000/api/services",
+        "options": {}
+      },
+      "id": "bb000001-bbbb-bbbb-bbbb-000000000001",
+      "name": "Buscar Serviços MCP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, -160],
+      "notes": "Retorna {services: [...]} — objeto único, não array. Executado 1x antes de dividir por cliente."
+    },
+    {
+      "parameters": {
         "jsCode": "const d = new Date();\nd.setDate(d.getDate() + 1);\nconst y = d.getFullYear();\nconst m = String(d.getMonth() + 1).padStart(2, '0');\nconst day = String(d.getDate()).padStart(2, '0');\nreturn [{ json: { tomorrow: `${y}-${m}-${day}` } }];"
       },
       "id": "d879b9e6-8141-4546-bc45-01b940be1bfb",
       "name": "Calcular Amanhã",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [80, -160]
+      "position": [304, -160]
     },
     {
       "parameters": {
@@ -74,29 +87,29 @@
       "name": "Buscar Agendamentos de Amanhã",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [304, -160]
+      "position": [528, -160]
     },
     {
       "parameters": {
-        "jsCode": "// Agrupa múltiplos agendamentos do mesmo cliente em um único item\n// Garante que clientes com 2+ serviços recebam apenas 1 mensagem\nconst items = $input.all();\nconst grouped = {};\n\nfor (const item of items) {\n  const phone = item.json.Telefone;\n  if (!grouped[phone]) {\n    grouped[phone] = {\n      Telefone: phone,\n      v_cliente: item.json.v_cliente,\n      appointments: []\n    };\n  }\n  grouped[phone].appointments.push({\n    id: item.json.id,\n    start: item.json.start,\n    id_servico: String(item.json.id_servico),\n    id_barbeiro: String(item.json.id_barbeiro)\n  });\n}\n\n// Ordena os agendamentos de cada cliente por horário\nconst result = Object.values(grouped).map(client => {\n  client.appointments.sort((a, b) => a.start.localeCompare(b.start));\n  client.appointment_ids = client.appointments.map(a => a.id).join(',');\n  return { json: client };\n});\n\nreturn result;"
+        "jsCode": "// Agrupa múltiplos agendamentos do mesmo cliente em um único item\nconst items = $input.all();\nconst grouped = {};\n\nfor (const item of items) {\n  const phone = item.json.Telefone;\n  if (!grouped[phone]) {\n    grouped[phone] = {\n      Telefone: phone,\n      v_cliente: item.json.v_cliente,\n      appointments: []\n    };\n  }\n  grouped[phone].appointments.push({\n    id: item.json.id,\n    start: item.json.start,\n    id_servico: String(item.json.id_servico),\n    id_barbeiro: String(item.json.id_barbeiro)\n  });\n}\n\nconst result = Object.values(grouped).map(client => {\n  client.appointments.sort((a, b) => a.start.localeCompare(b.start));\n  client.appointment_ids = client.appointments.map(a => a.id).join(',');\n  return { json: client };\n});\n\nreturn result;"
       },
       "id": "aa000001-aaaa-aaaa-aaaa-000000000001",
       "name": "Agrupar por Cliente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [528, -160],
+      "position": [752, -160],
       "notes": "Um cliente com 2 serviços gera 2 linhas no Supabase mas deve receber 1 mensagem única"
     },
     {
       "parameters": {
-        "jsCode": "// $json aqui é o objeto do cliente vindo de 'Agrupar por Cliente'\n// Busca nomes dos serviços diretamente no servidor MCP\nconst client = $json;\n\nlet serviceMap = {};\ntry {\n  const resp = await fetch('http://bemp-mcp:8000/api/services');\n  if (resp.ok) {\n    const svcs = await resp.json();\n    if (Array.isArray(svcs)) {\n      for (const svc of svcs) {\n        if (svc.id != null && svc.name) serviceMap[String(svc.id)] = svc.name;\n      }\n    }\n  }\n} catch (e) {\n  // Se MCP indisponível, usa ID como fallback\n}\n\nconst emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];\nconst apptLines = client.appointments.map((appt, i) => {\n  const serviceName = serviceMap[appt.id_servico] || `Serviço ${appt.id_servico}`;\n  const d = new Date(appt.start);\n  const timeStr = d.toLocaleTimeString('pt-BR', {\n    hour: '2-digit',\n    minute: '2-digit',\n    timeZone: 'America/Sao_Paulo'\n  });\n  return `${emojis[i] || '•'} *${serviceName}* — ${timeStr}`;\n});\n\nconst plural = client.appointments.length > 1;\nconst header = plural\n  ? `Passando para confirmar seus *${client.appointments.length} agendamentos* de amanhã na *Don Aveiro* ✂️`\n  : `Passando para confirmar seu agendamento de amanhã na *Don Aveiro* ✂️`;\n\nconst msg = `Olá, *${client.v_cliente}*! 👋\\n\\n${header}\\n\\n${apptLines.join('\\n')}\\n\\nConfirme sua presença respondendo:\\n✅ *CONFIRMO* — presença confirmada\\n❌ *CANCELAR* — se não puder comparecer\\n\\nCaso cancele, podemos remarcar direto aqui no chat! 😊`;\n\nreturn [{\n  json: {\n    Telefone: client.Telefone,\n    v_cliente: client.v_cliente,\n    chatId: `${client.Telefone}@c.us`,\n    text: msg,\n    appointment_ids: client.appointment_ids\n  }\n}];"
+        "jsCode": "// $json = objeto do cliente (de 'Agrupar por Cliente')\n// $('Buscar Serviços MCP').first().json.services = array de serviços buscado 1x no início\nconst client = $json;\nconst svcs = $('Buscar Serviços MCP').first().json.services || [];\n\nconst serviceMap = {};\nfor (const svc of svcs) {\n  if (svc.id != null && svc.name) serviceMap[String(svc.id)] = svc.name;\n}\n\nconst emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];\nconst apptLines = client.appointments.map((appt, i) => {\n  const serviceName = serviceMap[appt.id_servico] || `Serviço ${appt.id_servico}`;\n  const d = new Date(appt.start);\n  const timeStr = d.toLocaleTimeString('pt-BR', {\n    hour: '2-digit',\n    minute: '2-digit',\n    timeZone: 'America/Sao_Paulo'\n  });\n  return `${emojis[i] || '•'} *${serviceName}* — ${timeStr}`;\n});\n\nconst plural = client.appointments.length > 1;\nconst header = plural\n  ? `Passando para confirmar seus *${client.appointments.length} agendamentos* de amanhã na *Don Aveiro* ✂️`\n  : `Passando para confirmar seu agendamento de amanhã na *Don Aveiro* ✂️`;\n\nconst msg = `Olá, *${client.v_cliente}*! 👋\\n\\n${header}\\n\\n${apptLines.join('\\n')}\\n\\nConfirme sua presença respondendo:\\n✅ *CONFIRMO* — presença confirmada\\n❌ *CANCELAR* — se não puder comparecer\\n\\nCaso cancele, podemos remarcar direto aqui no chat! 😊`;\n\nreturn [{\n  json: {\n    Telefone: client.Telefone,\n    v_cliente: client.v_cliente,\n    chatId: `${client.Telefone}@c.us`,\n    text: msg,\n    appointment_ids: client.appointment_ids\n  }\n}];"
       },
       "id": "aa000003-aaaa-aaaa-aaaa-000000000003",
       "name": "Formatar Mensagem",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [752, -160],
-      "notes": "Recebe 1 item por cliente de 'Agrupar por Cliente'. Busca nomes dos serviços via MCP internamente."
+      "position": [976, -160],
+      "notes": "Usa $('Buscar Serviços MCP').first().json.services para montar o mapa de nomes"
     },
     {
       "parameters": {
@@ -111,7 +124,7 @@
       "name": "Redis - Criar Chave de Confirmação",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [976, -160],
+      "position": [1200, -160],
       "credentials": {
         "redis": {
           "id": "U9HEZyPuKhnXUoe8",
@@ -131,7 +144,7 @@
       },
       "type": "n8n-nodes-waha.WAHA",
       "typeVersion": 202411,
-      "position": [1200, -160],
+      "position": [1424, -160],
       "id": "5dc33deb-28b2-40db-97e6-5bc23f17533b",
       "name": "Msg Confirmação",
       "credentials": {
@@ -144,6 +157,9 @@
   ],
   "connections": {
     "Agendamento Diário 18h": {
+      "main": [[{"node": "Buscar Serviços MCP", "type": "main", "index": 0}]]
+    },
+    "Buscar Serviços MCP": {
       "main": [[{"node": "Calcular Amanhã", "type": "main", "index": 0}]]
     },
     "Calcular Amanhã": {
