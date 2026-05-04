@@ -33,12 +33,12 @@
           "options": {
             "caseSensitive": false,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "loose"
           },
           "conditions": [
             {
               "id": "check-confirm-key",
-              "leftValue": "={{ $json }}",
+              "leftValue": "={{ Object.values($json)[0] }}",
               "rightValue": "",
               "operator": {
                 "type": "string",
@@ -58,7 +58,8 @@
     },
     {
       "parameters": {
-        "jsCode": "const appointmentIds = $('Redis - Verificar Chave de Confirmação').item.json;\nconst dados = $('Dados').item.json;\nreturn [{\n  json: {\n    appointment_ids: appointmentIds,\n    telefone: dados.msg.telefone,\n    chatId: `${dados.msg.telefone}@c.us`,\n    texto_mensagem: (dados.msg.body || dados.msg.text || '').trim()\n  }\n}];"
+        "jsCode": "// Extrai IDs do Redis e dados do cliente\nconst redisData = $('Redis - Verificar Chave de Confirmação').first().json;\nconst appointmentIds = String(Object.values(redisData)[0]);\nconst dados = $('Dados').first().json;\n\nreturn [{\n  json: {\n    appointment_ids: appointmentIds,\n    telefone: dados.msg.telefone,\n    chatId: dados.msg.telefone,\n    texto_mensagem: (dados.msg.msgtext || dados.msg.body || dados.msg.text || '').trim()\n  }\n}];",
+        "mode": "runOnceForAllItems"
       },
       "id": "da010003-0003-0003-0003-000000000003",
       "name": "Extrair Dados da Confirmação",
@@ -70,7 +71,7 @@
       "parameters": {
         "promptType": "define",
         "text": "={{ $json.texto_mensagem }}",
-        "systemMessage": "Você é o assistente da barbearia Don Aveiro.\n\nEndereço: COLOQUE_O_ENDERECO_AQUI\n\nUm cliente recebeu uma mensagem pedindo confirmação do agendamento de amanhã e respondeu. Analise a resposta e:\n\n- Se o cliente está confirmando presença (ex: sim, confirmo, ok, vou, estarei lá, pode confirmar, etc): comece sua resposta com exatamente a palavra CONFIRMADO: e em seguida envie uma mensagem animada confirmando, inclua o endereço e peça para chegar alguns minutinhos antes. Use emojis.\n\n- Em qualquer outro caso (cancelar, não posso, dúvida, mensagem fora de contexto, etc): comece sua resposta com exatamente a palavra CANCELADO: e em seguida informe com empatia que o agendamento foi cancelado e convide o cliente a remarcar pelo chat.\n\nIMPORTANTE: Sua resposta DEVE começar com CONFIRMADO: ou CANCELADO: (com dois pontos). Nada antes disso."
+        "systemMessage": "Você é o assistente da barbearia Don Aveiro.\n\nEndereço: COLOQUE_O_ENDERECO_AQUI\n\nUm cliente recebeu uma mensagem pedindo confirmação do agendamento de amanhã e respondeu. Analise a resposta e:\n\n- Se o cliente está confirmando presença (ex: sim, confirmo, ok, vou, estarei lá, pode confirmar, com certeza, claro, etc): comece sua resposta com exatamente a palavra CONFIRMADO: e em seguida envie uma mensagem simpática e animada confirmando a presença. Inclua o endereço e peça para chegar alguns minutinhos antes. Pule linhas entre os parágrafos. Use emojis com moderação.\n\n- Em qualquer outro caso (cancelar, não posso, dúvida, mensagem fora de contexto, etc): comece sua resposta com exatamente a palavra CANCELADO: e em seguida informe com empatia que o agendamento foi cancelado e convide o cliente a remarcar pelo chat. Pule linhas entre os parágrafos.\n\nIMPORTANTE: Sua resposta DEVE começar com CONFIRMADO: ou CANCELADO: (com dois pontos, sem espaço antes). Nada antes disso. Em caso de dúvida sobre a intenção do cliente, trate como CONFIRMADO."
       },
       "id": "da010004-0004-0004-0004-000000000004",
       "name": "AI Agent - Confirmação",
@@ -105,7 +106,7 @@
           "conditions": [
             {
               "id": "check-confirmado",
-              "leftValue": "={{ $json.output }}",
+              "leftValue": "={{ $json.output.toLowerCase() }}",
               "rightValue": "confirmado:",
               "operator": {
                 "type": "string",
@@ -126,7 +127,7 @@
     {
       "parameters": {
         "operation": "delete",
-        "key": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}_confirm"
+        "key": "={{ $('Extrair Dados da Confirmação').first().json.telefone }}_confirm"
       },
       "id": "da010006-0006-0006-0006-000000000006",
       "name": "Redis - Remover Chave (Confirmado)",
@@ -144,8 +145,8 @@
         "resource": "Chatting",
         "operation": "Send Text",
         "session": "=default",
-        "chatId": "={{ $('Extrair Dados da Confirmação').item.json.chatId }}",
-        "text": "={{ $('AI Agent - Confirmação').item.json.output.replace(/^CONFIRMADO:\\s*/i, '') }}",
+        "chatId": "={{ $('Extrair Dados da Confirmação').first().json.chatId }}",
+        "text": "={{ $('AI Agent - Confirmação').first().json.output.replace(/^CONFIRMADO:\\s*/i, '') }}",
         "requestOptions": {}
       },
       "id": "da010007-0007-0007-0007-000000000007",
@@ -161,14 +162,54 @@
     },
     {
       "parameters": {
-        "jsCode": "const dados = $('Extrair Dados da Confirmação').item.json;\nconst phone = String(dados.telefone).replace('@c.us', '');\nconst ids = String(dados.appointment_ids).split(',').map(id => id.trim()).filter(Boolean);\n\nconst results = [];\nfor (const appointment_id of ids) {\n  try {\n    const resp = await $http.request({\n      method: 'POST',\n      url: 'http://bemp-mcp:8000/api/cancel_appointment',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ appointment_id: Number(appointment_id), phone })\n    });\n    results.push({ id: appointment_id, result: resp });\n  } catch(e) {\n    results.push({ id: appointment_id, error: e.message });\n  }\n}\n\nreturn [{ json: { ...dados, cancelled: results } }];"
+        "jsCode": "// Divide os IDs de agendamento em itens separados (1 item por ID)\n// para que o nó HTTP Request cancele cada um individualmente\nconst dados = $('Extrair Dados da Confirmação').first().json;\nconst phone = String(dados.telefone).replace('@c.us', '');\nconst ids = String(dados.appointment_ids).split(',').map(id => id.trim()).filter(Boolean);\n\nreturn ids.map(id => ({\n  json: { appointment_id: Number(id), phone }\n}));",
+        "mode": "runOnceForAllItems"
       },
-      "id": "da010008-0008-0008-0008-000000000008",
-      "name": "MCP - Cancelar Agendamentos",
+      "id": "da010011-0011-0011-0011-000000000011",
+      "name": "Preparar IDs para Cancelamento",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1560, 300],
-      "notes": "Cancela 1 ou múltiplos agendamentos via MCP"
+      "notes": "Gera 1 item por ID de agendamento para o HTTP Request cancelar cada um"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://bemp-mcp:8000/api/cancel_appointment",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "appointment_id",
+              "value": "={{ $json.appointment_id }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.phone }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "da010012-0012-0012-0012-000000000012",
+      "name": "HTTP - Cancelar Agendamento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300],
+      "notes": "Executa 1x por agendamento. Para cliente com 2 serviços, roda 2 vezes."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Consolida todos os itens de volta em 1 para Redis e WAHA executarem apenas 1x\nconst dados = $('Extrair Dados da Confirmação').first().json;\nconst totalCancelados = $input.all().length;\nreturn [{ json: { ...dados, total_cancelados: totalCancelados } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "da010013-0013-0013-0013-000000000013",
+      "name": "Consolidar Cancelamentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300],
+      "notes": "Reduz N itens de volta a 1 para evitar múltiplas mensagens ao cliente"
     },
     {
       "parameters": {
@@ -179,7 +220,7 @@
       "name": "Redis - Remover Chave (Cancelado)",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [1780, 300],
+      "position": [2220, 300],
       "credentials": {
         "redis": {
           "name": "Redis Don Aveiro"
@@ -191,15 +232,15 @@
         "resource": "Chatting",
         "operation": "Send Text",
         "session": "=default",
-        "chatId": "={{ $('Extrair Dados da Confirmação').item.json.chatId }}",
-        "text": "={{ $('AI Agent - Confirmação').item.json.output.replace(/^CANCELADO:\\s*/i, '') }}",
+        "chatId": "={{ $('Extrair Dados da Confirmação').first().json.chatId }}",
+        "text": "={{ $('AI Agent - Confirmação').first().json.output.replace(/^CANCELADO:\\s*/i, '') }}",
         "requestOptions": {}
       },
       "id": "da010010-0010-0010-0010-000000000010",
       "name": "WAHA - Oferecer Reagendamento",
       "type": "n8n-nodes-waha.WAHA",
       "typeVersion": 202411,
-      "position": [2000, 300],
+      "position": [2440, 300],
       "credentials": {
         "wahaApi": {
           "name": "WAHA account"
@@ -241,13 +282,19 @@
     "É Confirmação?": {
       "main": [
         [{"node": "Redis - Remover Chave (Confirmado)", "type": "main", "index": 0}],
-        [{"node": "MCP - Cancelar Agendamentos", "type": "main", "index": 0}]
+        [{"node": "Preparar IDs para Cancelamento", "type": "main", "index": 0}]
       ]
     },
     "Redis - Remover Chave (Confirmado)": {
       "main": [[{"node": "WAHA - Confirmar Presença", "type": "main", "index": 0}]]
     },
-    "MCP - Cancelar Agendamentos": {
+    "Preparar IDs para Cancelamento": {
+      "main": [[{"node": "HTTP - Cancelar Agendamento", "type": "main", "index": 0}]]
+    },
+    "HTTP - Cancelar Agendamento": {
+      "main": [[{"node": "Consolidar Cancelamentos", "type": "main", "index": 0}]]
+    },
+    "Consolidar Cancelamentos": {
       "main": [[{"node": "Redis - Remover Chave (Cancelado)", "type": "main", "index": 0}]]
     },
     "Redis - Remover Chave (Cancelado)": {
