@@ -72,29 +72,19 @@
       "parameters": {
         "method": "POST",
         "url": "https://api.openai.com/v1/chat/completions",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $vars.OPENAI_API_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
         "sendBody": true,
         "contentType": "json",
         "body": {
           "model": "gpt-4o-mini",
           "temperature": 0,
-          "max_tokens": 10,
+          "max_tokens": 300,
+          "response_format": { "type": "json_object" },
           "messages": [
             {
               "role": "system",
-              "content": "Você analisa respostas de clientes de uma barbearia que receberam uma mensagem pedindo confirmação de agendamento. Classifique a intenção da mensagem. Responda APENAS com uma única palavra: positivo (cliente confirma presença), negativo (cliente quer cancelar) ou indefinido (não dá para determinar)."
+              "content": "Você é o assistente virtual da barbearia Don Aveiro.\n\nEndereço: COLOQUE_O_ENDERECO_AQUI\n\nUm cliente recebeu uma mensagem de confirmação de agendamento e respondeu. Analise a resposta e retorne um JSON com dois campos:\n- \"intencao\": uma das três palavras exatas: positivo, negativo, indefinido\n- \"resposta\": a mensagem que será enviada ao cliente pelo WhatsApp\n\nRegras para a resposta:\n- Se positivo: confirme a presença de forma animada, inclua o endereço e peça para chegar alguns minutinhos antes. Use emojis.\n- Se negativo: informe que o agendamento foi cancelado com empatia e ofereça remarcar pelo chat.\n- Se indefinido: peça educadamente para responder apenas CONFIRMO ou CANCELAR.\n\nRetorne APENAS o JSON, sem texto adicional."
             },
             {
               "role": "user",
@@ -109,18 +99,23 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [1120, 200],
-      "notes": "Usa gpt-4o-mini para classificar: positivo / negativo / indefinido. Crie a variável OPENAI_API_KEY nas Settings > Variables do n8n."
+      "credentials": {
+        "openAiApi": {
+          "name": "OpenAI account"
+        }
+      },
+      "notes": "Usa credencial OpenAI do n8n. Altere 'COLOQUE_O_ENDERECO_AQUI' na system message acima."
     },
     {
       "parameters": {
-        "jsCode": "const aiResponse = $json.choices[0].message.content.trim().toLowerCase();\nconst dados = $('Extrair Dados da Confirmação').item.json;\nconst intencao = ['positivo', 'negativo', 'indefinido'].includes(aiResponse) ? aiResponse : 'indefinido';\nreturn [{ json: { ...dados, intencao } }];"
+        "jsCode": "const raw = $json.choices[0].message.content.trim();\nconst dados = $('Extrair Dados da Confirmação').item.json;\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch(e) {\n  parsed = { intencao: 'indefinido', resposta: 'Oi! Não entendi sua resposta. 😅\\n\\nPara *confirmar*, responda *CONFIRMO*.\\nPara *cancelar*, responda *CANCELAR*.' };\n}\n\nconst intencao = ['positivo', 'negativo', 'indefinido'].includes(parsed.intencao) ? parsed.intencao : 'indefinido';\n\nreturn [{ json: { ...dados, intencao, resposta: parsed.resposta } }];"
       },
       "id": "da010005-0005-0005-0005-000000000005",
       "name": "Extrair Intenção da IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1340, 200],
-      "notes": "Extrai a palavra retornada pela IA e garante que seja positivo/negativo/indefinido"
+      "notes": "Extrai intencao e resposta do JSON retornado pela IA"
     },
     {
       "parameters": {
@@ -147,7 +142,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [1560, 200],
-      "notes": "Saída 0 = positivo | Saída 1 = negativo | Fallback = indefinido (pede para repetir)"
+      "notes": "Saída 0 = positivo | Saída 1 = negativo | Fallback = indefinido"
     },
     {
       "parameters": {
@@ -171,7 +166,7 @@
         "operation": "Send Text",
         "session": "=default",
         "chatId": "={{ $json.chatId }}",
-        "text": "=✅ *Confirmado!* Que ótimo, te esperamos amanhã! 😄\n\n📍 *Endereço:*\n{{ $vars.ENDERECO_BARBEARIA }}\n\n⏰ Chegue alguns minutinhos antes. Qualquer dúvida, é só chamar aqui!",
+        "text": "={{ $json.resposta }}",
         "requestOptions": {}
       },
       "id": "da010008-0008-0008-0008-000000000008",
@@ -184,7 +179,7 @@
           "name": "WAHA account"
         }
       },
-      "notes": "Configure ENDERECO_BARBEARIA nas Settings > Variables do n8n"
+      "notes": "Mensagem gerada pela IA (inclui endereço da system message)"
     },
     {
       "parameters": {
@@ -195,7 +190,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1780, 200],
-      "notes": "Cancela 1 ou múltiplos agendamentos via MCP. Suporta IDs separados por vírgula."
+      "notes": "Cancela 1 ou múltiplos agendamentos via MCP"
     },
     {
       "parameters": {
@@ -219,7 +214,7 @@
         "operation": "Send Text",
         "session": "=default",
         "chatId": "={{ $json.chatId }}",
-        "text": "=😔 Que pena! Seu agendamento foi cancelado.\n\nQuer marcar um novo horário? É só me dizer quando fica melhor pra você que eu verifico a disponibilidade! 📅",
+        "text": "={{ $json.resposta }}",
         "requestOptions": {}
       },
       "id": "da010011-0011-0011-0011-000000000011",
@@ -231,7 +226,8 @@
         "wahaApi": {
           "name": "WAHA account"
         }
-      }
+      },
+      "notes": "Mensagem gerada pela IA"
     },
     {
       "parameters": {
@@ -239,7 +235,7 @@
         "operation": "Send Text",
         "session": "=default",
         "chatId": "={{ $json.chatId }}",
-        "text": "=Oi! Não entendi sua resposta. 😅\n\nPara *confirmar* seu agendamento de amanhã, responda *CONFIRMO*.\nPara *cancelar*, responda *CANCELAR*.",
+        "text": "={{ $json.resposta }}",
         "requestOptions": {}
       },
       "id": "da010012-0012-0012-0012-000000000012",
@@ -252,7 +248,7 @@
           "name": "WAHA account"
         }
       },
-      "notes": "Fallback: IA não conseguiu classificar a intenção"
+      "notes": "Fallback: IA não classificou — mensagem gerada pela própria IA"
     },
     {
       "parameters": {},
