@@ -38,7 +38,7 @@
           "conditions": [
             {
               "id": "check-confirm-key",
-              "leftValue": "={{ Object.values($json)[0] }}",
+              "leftValue": "={{ Object.values($json)[0] ?? '' }}",
               "rightValue": "",
               "operator": {
                 "type": "string",
@@ -58,14 +58,15 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extrai IDs do Redis e dados do cliente\nconst redisData = $('Redis - Verificar Chave de Confirmação').first().json;\nconst appointmentIds = String(Object.values(redisData)[0]);\nconst dados = $('Dados').first().json;\n\nreturn [{\n  json: {\n    appointment_ids: appointmentIds,\n    telefone: dados.msg.telefone,\n    chatId: dados.msg.telefone,\n    texto_mensagem: (dados.msg.msgtext || dados.msg.body || dados.msg.text || '').trim()\n  }\n}];",
+        "jsCode": "// Extrai dados do cliente para uso em todo o fluxo de confirmação\nconst dados = $('Dados').first().json;\n\nreturn [{\n  json: {\n    telefone: dados.msg.telefone,\n    chatId: dados.msg.telefone,\n    session: dados.msg.session,\n    texto_mensagem: (dados.msg.msgtext || dados.msg.body || dados.msg.text || '').trim()\n  }\n}];",
         "mode": "runOnceForAllItems"
       },
       "id": "da010003-0003-0003-0003-000000000003",
       "name": "Extrair Dados da Confirmação",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 200]
+      "position": [900, 200],
+      "notes": "Extrai telefone, chatId, session e texto da mensagem do cliente"
     },
     {
       "parameters": {
@@ -144,7 +145,7 @@
       "parameters": {
         "resource": "Chatting",
         "operation": "Send Text",
-        "session": "=default",
+        "session": "={{ $('Extrair Dados da Confirmação').first().json.session }}",
         "chatId": "={{ $('Extrair Dados da Confirmação').first().json.chatId }}",
         "text": "={{ $('AI Agent - Confirmação').first().json.output.replace(/^CONFIRMADO:\\s*/i, '') }}",
         "requestOptions": {}
@@ -162,15 +163,38 @@
     },
     {
       "parameters": {
-        "jsCode": "// Divide os IDs de agendamento em itens separados (1 item por ID)\n// para que o nó HTTP Request cancele cada um individualmente\nconst dados = $('Extrair Dados da Confirmação').first().json;\nconst phone = String(dados.telefone).replace('@c.us', '');\nconst ids = String(dados.appointment_ids).split(',').map(id => id.trim()).filter(Boolean);\n\nreturn ids.map(id => ({\n  json: { appointment_id: Number(id), phone }\n}));",
+        "method": "POST",
+        "url": "http://bemp-mcp:8000/api/customer_appointments",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $('Extrair Dados da Confirmação').first().json.telefone.replace('@c.us', '').replace('@s.whatsapp.net', '') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "da010014-0014-0014-0014-000000000014",
+      "name": "HTTP - Buscar Agendamentos do Cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300],
+      "notes": "Consulta o BEMP para obter os IDs reais dos agendamentos do cliente"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recebe a lista de agendamentos do BEMP e retorna 1 item por agendamento\nconst resposta = $input.first().json;\nconst phone = $('Extrair Dados da Confirmação').first().json.telefone\n  .replace('@c.us', '').replace('@s.whatsapp.net', '');\n\n// A resposta pode ser array direto ou aninhada em data/appointments/results\nconst appointments = Array.isArray(resposta)\n  ? resposta\n  : (resposta.data || resposta.appointments || resposta.results || []);\n\nif (appointments.length === 0) {\n  // Nenhum agendamento encontrado — retorna item vazio para não travar o fluxo\n  return [{ json: { appointment_id: null, phone, sem_agendamento: true } }];\n}\n\nreturn appointments.map(appt => ({\n  json: { appointment_id: appt.id, phone }\n}));",
         "mode": "runOnceForAllItems"
       },
-      "id": "da010011-0011-0011-0011-000000000011",
-      "name": "Preparar IDs para Cancelamento",
+      "id": "da010015-0015-0015-0015-000000000015",
+      "name": "Extrair IDs do BEMP",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1560, 300],
-      "notes": "Gera 1 item por ID de agendamento para o HTTP Request cancelar cada um"
+      "position": [1780, 300],
+      "notes": "Ajuste o campo 'appt.id' se o BEMP retornar o ID com outro nome (ex: appt.appointment_id)"
     },
     {
       "parameters": {
@@ -190,25 +214,31 @@
             }
           ]
         },
-        "options": {}
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
       },
       "id": "da010012-0012-0012-0012-000000000012",
       "name": "HTTP - Cancelar Agendamento",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1780, 300],
-      "notes": "Executa 1x por agendamento. Para cliente com 2 serviços, roda 2 vezes."
+      "position": [2000, 300],
+      "notes": "neverError=true: não quebra o fluxo se o BEMP retornar erro em um dos agendamentos"
     },
     {
       "parameters": {
-        "jsCode": "// Consolida todos os itens de volta em 1 para Redis e WAHA executarem apenas 1x\nconst dados = $('Extrair Dados da Confirmação').first().json;\nconst totalCancelados = $input.all().length;\nreturn [{ json: { ...dados, total_cancelados: totalCancelados } }];",
+        "jsCode": "// Consolida todos os itens de volta em 1 para Redis e WAHA executarem apenas 1x\nconst dados = $('Extrair Dados da Confirmação').first().json;\nconst totalCancelados = $input.all().filter(i => !i.json.sem_agendamento).length;\nreturn [{ json: { ...dados, total_cancelados: totalCancelados } }];",
         "mode": "runOnceForAllItems"
       },
       "id": "da010013-0013-0013-0013-000000000013",
       "name": "Consolidar Cancelamentos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2000, 300],
+      "position": [2220, 300],
       "notes": "Reduz N itens de volta a 1 para evitar múltiplas mensagens ao cliente"
     },
     {
@@ -220,7 +250,7 @@
       "name": "Redis - Remover Chave (Cancelado)",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [2220, 300],
+      "position": [2440, 300],
       "credentials": {
         "redis": {
           "name": "Redis Don Aveiro"
@@ -231,7 +261,7 @@
       "parameters": {
         "resource": "Chatting",
         "operation": "Send Text",
-        "session": "=default",
+        "session": "={{ $('Extrair Dados da Confirmação').first().json.session }}",
         "chatId": "={{ $('Extrair Dados da Confirmação').first().json.chatId }}",
         "text": "={{ $('AI Agent - Confirmação').first().json.output.replace(/^CANCELADO:\\s*/i, '') }}",
         "requestOptions": {}
@@ -240,7 +270,7 @@
       "name": "WAHA - Oferecer Reagendamento",
       "type": "n8n-nodes-waha.WAHA",
       "typeVersion": 202411,
-      "position": [2440, 300],
+      "position": [2660, 300],
       "credentials": {
         "wahaApi": {
           "name": "WAHA account"
@@ -282,13 +312,16 @@
     "É Confirmação?": {
       "main": [
         [{"node": "Redis - Remover Chave (Confirmado)", "type": "main", "index": 0}],
-        [{"node": "Preparar IDs para Cancelamento", "type": "main", "index": 0}]
+        [{"node": "HTTP - Buscar Agendamentos do Cliente", "type": "main", "index": 0}]
       ]
     },
     "Redis - Remover Chave (Confirmado)": {
       "main": [[{"node": "WAHA - Confirmar Presença", "type": "main", "index": 0}]]
     },
-    "Preparar IDs para Cancelamento": {
+    "HTTP - Buscar Agendamentos do Cliente": {
+      "main": [[{"node": "Extrair IDs do BEMP", "type": "main", "index": 0}]]
+    },
+    "Extrair IDs do BEMP": {
       "main": [[{"node": "HTTP - Cancelar Agendamento", "type": "main", "index": 0}]]
     },
     "HTTP - Cancelar Agendamento": {
