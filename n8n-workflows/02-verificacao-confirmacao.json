@@ -8,7 +8,7 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [240, 300],
-      "notes": "INSTRUÇÃO: Conecte a saída False do nó 'isBlocked?' do fluxo principal AQUI.\nA saída deste workflow (nó 'SAÍDA: fluxo normal') conecta no próximo nó do seu fluxo principal."
+      "notes": "Conecte a saída False do nó 'isBlocked?' do fluxo principal AQUI."
     },
     {
       "parameters": {
@@ -25,8 +25,7 @@
         "redis": {
           "name": "Redis Don Aveiro"
         }
-      },
-      "notes": "Busca: {msg.telefone}_confirm | Se existir → cliente está em fluxo de confirmação"
+      }
     },
     {
       "parameters": {
@@ -65,95 +64,75 @@
       "name": "Extrair Dados da Confirmação",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 200],
-      "notes": "Reúne appointment_ids (Redis) + telefone + texto da mensagem recebida"
+      "position": [900, 200]
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.openai.com/v1/chat/completions",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "openAiApi",
-        "sendBody": true,
-        "contentType": "json",
-        "body": {
-          "model": "gpt-4o-mini",
-          "temperature": 0,
-          "max_tokens": 300,
-          "response_format": { "type": "json_object" },
-          "messages": [
-            {
-              "role": "system",
-              "content": "Você é o assistente virtual da barbearia Don Aveiro.\n\nEndereço: COLOQUE_O_ENDERECO_AQUI\n\nUm cliente recebeu uma mensagem de confirmação de agendamento e respondeu. Analise a resposta e retorne um JSON com dois campos:\n- \"intencao\": uma das três palavras exatas: positivo, negativo, indefinido\n- \"resposta\": a mensagem que será enviada ao cliente pelo WhatsApp\n\nRegras para a resposta:\n- Se positivo: confirme a presença de forma animada, inclua o endereço e peça para chegar alguns minutinhos antes. Use emojis.\n- Se negativo: informe que o agendamento foi cancelado com empatia e ofereça remarcar pelo chat.\n- Se indefinido: peça educadamente para responder apenas CONFIRMO ou CANCELAR.\n\nRetorne APENAS o JSON, sem texto adicional."
-            },
-            {
-              "role": "user",
-              "content": "={{ $json.texto_mensagem }}"
-            }
-          ]
-        },
-        "options": {}
+        "promptType": "define",
+        "text": "={{ $json.texto_mensagem }}",
+        "systemMessage": "Você é o assistente da barbearia Don Aveiro.\n\nEndereço: COLOQUE_O_ENDERECO_AQUI\n\nUm cliente recebeu uma mensagem pedindo confirmação do agendamento de amanhã e respondeu. Analise a resposta e:\n\n- Se o cliente está confirmando presença (ex: sim, confirmo, ok, vou, estarei lá, pode confirmar, etc): comece sua resposta com exatamente a palavra CONFIRMADO: e em seguida envie uma mensagem animada confirmando, inclua o endereço e peça para chegar alguns minutinhos antes. Use emojis.\n\n- Em qualquer outro caso (cancelar, não posso, dúvida, mensagem fora de contexto, etc): comece sua resposta com exatamente a palavra CANCELADO: e em seguida informe com empatia que o agendamento foi cancelado e convide o cliente a remarcar pelo chat.\n\nIMPORTANTE: Sua resposta DEVE começar com CONFIRMADO: ou CANCELADO: (com dois pontos). Nada antes disso."
       },
       "id": "da010004-0004-0004-0004-000000000004",
-      "name": "IA - Classificar Intenção",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "AI Agent - Confirmação",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
       "position": [1120, 200],
+      "notes": "Conecte o seu Chat Model Gemini na entrada 'Chat Model' abaixo deste nó."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-1.5-flash",
+        "options": {}
+      },
+      "id": "da010004b-000b-000b-000b-00000000000b",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [1120, 380],
       "credentials": {
-        "openAiApi": {
-          "name": "OpenAI account"
+        "googlePalmApi": {
+          "name": "Google Gemini account"
         }
       },
-      "notes": "Usa credencial OpenAI do n8n. Altere 'COLOQUE_O_ENDERECO_AQUI' na system message acima."
+      "notes": "Ajuste o nome da credencial conforme cadastrado no seu n8n"
     },
     {
       "parameters": {
-        "jsCode": "const raw = $json.choices[0].message.content.trim();\nconst dados = $('Extrair Dados da Confirmação').item.json;\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch(e) {\n  parsed = { intencao: 'indefinido', resposta: 'Oi! Não entendi sua resposta. 😅\\n\\nPara *confirmar*, responda *CONFIRMO*.\\nPara *cancelar*, responda *CANCELAR*.' };\n}\n\nconst intencao = ['positivo', 'negativo', 'indefinido'].includes(parsed.intencao) ? parsed.intencao : 'indefinido';\n\nreturn [{ json: { ...dados, intencao, resposta: parsed.resposta } }];"
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "check-confirmado",
+              "leftValue": "={{ $json.output }}",
+              "rightValue": "confirmado:",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
       },
       "id": "da010005-0005-0005-0005-000000000005",
-      "name": "Extrair Intenção da IA",
-      "type": "n8n-nodes-base.code",
+      "name": "É Confirmação?",
+      "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1340, 200],
-      "notes": "Extrai intencao e resposta do JSON retornado pela IA"
-    },
-    {
-      "parameters": {
-        "mode": "expression",
-        "output": "={{ $json.intencao }}",
-        "rules": {
-          "rules": [
-            {
-              "outputKey": "positivo",
-              "value": "positivo",
-              "renameOutput": true
-            },
-            {
-              "outputKey": "negativo",
-              "value": "negativo",
-              "renameOutput": true
-            }
-          ]
-        },
-        "fallbackOutput": "extra"
-      },
-      "id": "da010006-0006-0006-0006-000000000006",
-      "name": "Switch: Intenção",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
-      "position": [1560, 200],
-      "notes": "Saída 0 = positivo | Saída 1 = negativo | Fallback = indefinido"
+      "notes": "True = CONFIRMADO | False = CANCELADO"
     },
     {
       "parameters": {
         "operation": "delete",
-        "key": "={{ $json.telefone }}_confirm"
+        "key": "={{ $('Extrair Dados da Confirmação').item.json.telefone }}_confirm"
       },
-      "id": "da010007-0007-0007-0007-000000000007",
+      "id": "da010006-0006-0006-0006-000000000006",
       "name": "Redis - Remover Chave (Confirmado)",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [1780, 80],
+      "position": [1560, 100],
       "credentials": {
         "redis": {
           "name": "Redis Don Aveiro"
@@ -165,31 +144,30 @@
         "resource": "Chatting",
         "operation": "Send Text",
         "session": "=default",
-        "chatId": "={{ $json.chatId }}",
-        "text": "={{ $json.resposta }}",
+        "chatId": "={{ $('Extrair Dados da Confirmação').item.json.chatId }}",
+        "text": "={{ $('AI Agent - Confirmação').item.json.output.replace(/^CONFIRMADO:\\s*/i, '') }}",
         "requestOptions": {}
       },
-      "id": "da010008-0008-0008-0008-000000000008",
+      "id": "da010007-0007-0007-0007-000000000007",
       "name": "WAHA - Confirmar Presença",
       "type": "n8n-nodes-waha.WAHA",
       "typeVersion": 202411,
-      "position": [2000, 80],
+      "position": [1780, 100],
       "credentials": {
         "wahaApi": {
           "name": "WAHA account"
         }
-      },
-      "notes": "Mensagem gerada pela IA (inclui endereço da system message)"
+      }
     },
     {
       "parameters": {
-        "jsCode": "const dados = $json;\nconst phone = String(dados.telefone).replace('@c.us', '');\nconst ids = String(dados.appointment_ids).split(',').map(id => id.trim()).filter(Boolean);\n\nconst results = [];\nfor (const appointment_id of ids) {\n  try {\n    const resp = await $http.request({\n      method: 'POST',\n      url: 'http://bemp-mcp:8000/api/cancel_appointment',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ appointment_id: Number(appointment_id), phone })\n    });\n    results.push({ id: appointment_id, result: resp });\n  } catch(e) {\n    results.push({ id: appointment_id, error: e.message });\n  }\n}\n\nreturn [{ json: { ...dados, cancelled: results, total: ids.length } }];"
+        "jsCode": "const dados = $('Extrair Dados da Confirmação').item.json;\nconst phone = String(dados.telefone).replace('@c.us', '');\nconst ids = String(dados.appointment_ids).split(',').map(id => id.trim()).filter(Boolean);\n\nconst results = [];\nfor (const appointment_id of ids) {\n  try {\n    const resp = await $http.request({\n      method: 'POST',\n      url: 'http://bemp-mcp:8000/api/cancel_appointment',\n      headers: { 'Content-Type': 'application/json' },\n      body: JSON.stringify({ appointment_id: Number(appointment_id), phone })\n    });\n    results.push({ id: appointment_id, result: resp });\n  } catch(e) {\n    results.push({ id: appointment_id, error: e.message });\n  }\n}\n\nreturn [{ json: { ...dados, cancelled: results } }];"
       },
-      "id": "da010009-0009-0009-0009-000000000009",
+      "id": "da010008-0008-0008-0008-000000000008",
       "name": "MCP - Cancelar Agendamentos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1780, 200],
+      "position": [1560, 300],
       "notes": "Cancela 1 ou múltiplos agendamentos via MCP"
     },
     {
@@ -197,11 +175,11 @@
         "operation": "delete",
         "key": "={{ $json.telefone }}_confirm"
       },
-      "id": "da010010-0010-0010-0010-000000000010",
+      "id": "da010009-0009-0009-0009-000000000009",
       "name": "Redis - Remover Chave (Cancelado)",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [2000, 200],
+      "position": [1780, 300],
       "credentials": {
         "redis": {
           "name": "Redis Don Aveiro"
@@ -213,42 +191,20 @@
         "resource": "Chatting",
         "operation": "Send Text",
         "session": "=default",
-        "chatId": "={{ $json.chatId }}",
-        "text": "={{ $json.resposta }}",
+        "chatId": "={{ $('Extrair Dados da Confirmação').item.json.chatId }}",
+        "text": "={{ $('AI Agent - Confirmação').item.json.output.replace(/^CANCELADO:\\s*/i, '') }}",
         "requestOptions": {}
       },
-      "id": "da010011-0011-0011-0011-000000000011",
+      "id": "da010010-0010-0010-0010-000000000010",
       "name": "WAHA - Oferecer Reagendamento",
       "type": "n8n-nodes-waha.WAHA",
       "typeVersion": 202411,
-      "position": [2220, 200],
+      "position": [2000, 300],
       "credentials": {
         "wahaApi": {
           "name": "WAHA account"
         }
-      },
-      "notes": "Mensagem gerada pela IA"
-    },
-    {
-      "parameters": {
-        "resource": "Chatting",
-        "operation": "Send Text",
-        "session": "=default",
-        "chatId": "={{ $json.chatId }}",
-        "text": "={{ $json.resposta }}",
-        "requestOptions": {}
-      },
-      "id": "da010012-0012-0012-0012-000000000012",
-      "name": "WAHA - Pedir para Repetir",
-      "type": "n8n-nodes-waha.WAHA",
-      "typeVersion": 202411,
-      "position": [1780, 360],
-      "credentials": {
-        "wahaApi": {
-          "name": "WAHA account"
-        }
-      },
-      "notes": "Fallback: IA não classificou — mensagem gerada pela própria IA"
+      }
     },
     {
       "parameters": {},
@@ -257,7 +213,7 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [900, 420],
-      "notes": "INSTRUÇÃO: Conecte a saída deste nó ao próximo nó do seu fluxo principal de atendimento."
+      "notes": "Conecte a saída deste nó ao próximo nó do seu fluxo principal de atendimento."
     }
   ],
   "connections": {
@@ -274,19 +230,18 @@
       ]
     },
     "Extrair Dados da Confirmação": {
-      "main": [[{"node": "IA - Classificar Intenção", "type": "main", "index": 0}]]
+      "main": [[{"node": "AI Agent - Confirmação", "type": "main", "index": 0}]]
     },
-    "IA - Classificar Intenção": {
-      "main": [[{"node": "Extrair Intenção da IA", "type": "main", "index": 0}]]
+    "Gemini Chat Model": {
+      "ai_languageModel": [[{"node": "AI Agent - Confirmação", "type": "ai_languageModel", "index": 0}]]
     },
-    "Extrair Intenção da IA": {
-      "main": [[{"node": "Switch: Intenção", "type": "main", "index": 0}]]
+    "AI Agent - Confirmação": {
+      "main": [[{"node": "É Confirmação?", "type": "main", "index": 0}]]
     },
-    "Switch: Intenção": {
+    "É Confirmação?": {
       "main": [
         [{"node": "Redis - Remover Chave (Confirmado)", "type": "main", "index": 0}],
-        [{"node": "MCP - Cancelar Agendamentos", "type": "main", "index": 0}],
-        [{"node": "WAHA - Pedir para Repetir", "type": "main", "index": 0}]
+        [{"node": "MCP - Cancelar Agendamentos", "type": "main", "index": 0}]
       ]
     },
     "Redis - Remover Chave (Confirmado)": {
