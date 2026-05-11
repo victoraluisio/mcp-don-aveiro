@@ -148,10 +148,11 @@ class BempClient:
                 if not isinstance(svc, dict) or not svc.get("id") or not svc.get("name"):
                     continue
                 price_type = str(svc.get("price_type") or "").upper()
+                base_price = svc.get("price_currency") or svc.get("price") or ""
                 price_display = (
-                    "A combinar"
-                    if price_type == "VARIABLE"
-                    else (svc.get("price_currency") or svc.get("price") or "")
+                    f"A partir de {base_price}" if price_type == "VARIABLE" and base_price
+                    else "A combinar" if price_type == "VARIABLE"
+                    else base_price
                 )
                 result.append({
                     "id": svc.get("id"),
