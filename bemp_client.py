@@ -398,11 +398,18 @@ class BempClient:
         corretos sem exigir que o agente leia e interprete uma lista
         longa de servicos.
         """
+        sid = self._resolve_salon(salon_id)
+        raw_services = self._request("GET", f"{self.api_base}/api/salons/{sid}/services")
         services = self.list_services(salon_id=salon_id)
         if not isinstance(services, list):
             return services
 
-        # Indice rapido nome -> service (case-insensitive)
+        raw_by_id = {}
+        if isinstance(raw_services, list):
+            for rs in raw_services:
+                if isinstance(rs, dict) and rs.get("id"):
+                    raw_by_id[rs["id"]] = {k: v for k, v in rs.items() if "price" in k.lower() or "value" in k.lower() or "amount" in k.lower() or "cost" in k.lower()}
+
         results: list[dict] = []
         unmatched: list[str] = []
 
@@ -415,6 +422,7 @@ class BempClient:
                     "duration": svc.get("duration"),
                     "price_display": svc.get("price_display"),
                     "price_type": svc.get("price_type"),
+                    "_debug_raw_price_fields": raw_by_id.get(svc["id"], {}),
                 }
                 for svc in services
                 if isinstance(svc, dict) and q_lower in (svc.get("name") or "").lower()
