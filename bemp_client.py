@@ -154,13 +154,17 @@ class BempClient:
                     else "A combinar" if price_type == "VARIABLE"
                     else base_price
                 )
-                result.append({
+                entry: dict = {
                     "id": svc.get("id"),
                     "name": svc.get("name"),
                     "duration": svc.get("duration"),
                     "price_display": price_display,
                     "price_type": price_type,
-                })
+                }
+                # DEBUG TEMPORARIO: expoe campos brutos de servicos variaveis
+                if price_type == "VARIABLE":
+                    entry["_debug_raw_keys"] = {k: v for k, v in svc.items() if "price" in k.lower() or "value" in k.lower() or "amount" in k.lower()}
+                result.append(entry)
             return result
         return raw
 
